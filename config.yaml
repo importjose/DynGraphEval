@@ -1,0 +1,11 @@
+model: tgn
+name:  Centralized TGN
+
+checkpoints:
+  - checkpoints/tgbl-wiki/tgn/run0.pt
+
+# ── Eval settings ─────────────────────────────────────────────────────────────
+dataset:   tgbl-wiki
+device:    null        
+seed:      42
+cache_dir: neg_cache

@@ -7,7 +7,6 @@ dependencies = [
     "pandas>=2.0",
     "torch>=2.0",
     "torch-geometric>=2.5",
-    "torch-scatter>=2.1",
     "py-tgb>=2.2",
     "tqdm>=4.65",
     "pyyaml>=6.0",

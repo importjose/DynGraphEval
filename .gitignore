@@ -216,3 +216,8 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# DynGraphEval
+checkpoints/       # model weights — too large for git, keep on Drive
+datasets/          # TGB datasets — downloaded at runtime
+neg_cache/         # generated negative samples — reproducible, not needed in git

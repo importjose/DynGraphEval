@@ -20,8 +20,6 @@ import numpy as np
 import torch
 from torch_geometric.data import TemporalData
 from torch_geometric.loader import TemporalDataLoader
-from torch_geometric.nn.models.tgn import LastNeighborLoader
-
 from ..base_model import BaseModel
 from .components import (
     TGNMemory,
@@ -29,6 +27,7 @@ from .components import (
     LinkPredictor,
     IdentityMessage,
     LastAggregator,
+    LastNeighborLoader,
 )
 
 
@@ -135,9 +134,13 @@ class TGN(BaseModel):
         self.memory.load_state_dict(ckpt["memory"])
         self.gnn.load_state_dict(ckpt["gnn"])
         self.link_pred.load_state_dict(ckpt["link_pred"])
-        # Reset message stores: checkpoint saves the memory buffer values
-        # but the stores are device-specific and must be re-initialized
-        self.memory.reset_state()
+        # Reset only message stores — the memory buffer contains trained node
+        # states from the checkpoint and must be preserved, not zeroed.
+        self.memory._reset_message_store()
+        # Switch to eval mode via the base class, bypassing TGNMemory.train()'s
+        # override. That override runs GRU(zeros, memory) for all nodes when
+        # message stores are empty, which would corrupt the loaded checkpoint values.
+        torch.nn.Module.train(self.memory, False)
 
     def warmup(self, train_data: TemporalData, val_data: TemporalData) -> None:
         """

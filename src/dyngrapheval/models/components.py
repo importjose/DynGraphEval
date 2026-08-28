@@ -26,7 +26,7 @@ import torch.nn.functional as F
 from torch import Tensor
 from torch.nn import GRUCell, Linear
 from torch_geometric.nn import SAGEConv, TransformerConv
-from torch_scatter import scatter
+from torch_geometric.utils import scatter
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -330,6 +330,104 @@ class LinkPredictor(nn.Module):
         h = self.lin_src(z_src) + self.lin_dst(z_dst)
         h = h.relu()
         return self.lin_final(h).sigmoid()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# LastNeighborLoader
+# Copied verbatim from tgn_tgbl_wiki.ipynb (the training notebook) to guarantee
+# identical behavior. PyG's built-in version may differ across releases, which
+# would produce a different edge_index convention and break the trained weights.
+# ─────────────────────────────────────────────────────────────────────────────
+
+class LastNeighborLoader:
+    """
+    Ring-buffer temporal neighbourhood store.
+
+    For each node, keeps the `size` most recent interactions.
+    Used by GraphAttentionEmbedding to build the 1-hop temporal subgraph.
+
+    insert(src, dst)
+        Records edges in both directions. Each edge gets a global e_id that
+        increments with cur_e_id, staying in sync with the temporal ordering
+        of data.t so that all_t[e_id] gives the correct timestamp.
+
+    __call__(n_id) → (all_n_id, edge_index, e_id)
+        Returns the subgraph for query nodes n_id:
+            all_n_id   : query nodes + all stored neighbours (unique)
+            edge_index : (2, E) with LOCAL indices into all_n_id;
+                         edge_index[0] = neighbour, edge_index[1] = query node
+            e_id       : global edge IDs for timestamp/feature lookups
+    """
+
+    def __init__(self, num_nodes: int, size: int, device=None):
+        self.size = size
+        self.neighbors = torch.empty((num_nodes, size), dtype=torch.long, device=device)
+        self.e_id      = torch.empty((num_nodes, size), dtype=torch.long, device=device)
+        self._assoc    = torch.empty(num_nodes,          dtype=torch.long, device=device)
+        self.reset_state()
+
+    def __call__(self, n_id: Tensor):
+        neighbors = self.neighbors[n_id]                    # (Q, size)
+        nodes     = n_id.view(-1, 1).repeat(1, self.size)  # (Q, size)
+        e_id      = self.e_id[n_id]                        # (Q, size)
+
+        # Drop empty slots (e_id < 0 means never filled)
+        mask = e_id >= 0
+        neighbors, nodes, e_id = neighbors[mask], nodes[mask], e_id[mask]
+
+        # All unique node IDs: query nodes + their valid neighbours
+        n_id = torch.cat([n_id, neighbors]).unique()
+
+        # Map global node IDs → local indices
+        self._assoc[n_id] = torch.arange(n_id.size(0), device=n_id.device)
+        neighbors = self._assoc[neighbors]
+        nodes     = self._assoc[nodes]
+
+        # edge_index[0] = neighbour (local), edge_index[1] = query node (local)
+        return n_id, torch.stack([neighbors, nodes]), e_id
+
+    def insert(self, src: Tensor, dst: Tensor):
+        """Record new edges (bidirectional). E-ids auto-assigned from cur_e_id."""
+        B = src.size(0)
+
+        # Both directions: dst's buffer gets src as neighbour, and vice versa
+        neighbors = torch.cat([src, dst])
+        nodes     = torch.cat([dst, src])
+        e_id      = torch.arange(
+            self.cur_e_id, self.cur_e_id + B, device=src.device
+        ).repeat(2)
+        self.cur_e_id += B
+
+        # Sort by node so we can update each node's ring buffer efficiently
+        nodes, perm = nodes.sort()
+        neighbors, e_id = neighbors[perm], e_id[perm]
+
+        n_id = nodes.unique()
+        self._assoc[n_id] = torch.arange(n_id.numel(), device=n_id.device)
+
+        # Compute write positions within the flat (num_unique_nodes × size) buffer
+        dense_id  = torch.arange(nodes.size(0), device=nodes.device) % self.size
+        dense_id += self._assoc[nodes].mul_(self.size)
+
+        dense_e_id = e_id.new_full((n_id.numel() * self.size,), -1)
+        dense_e_id[dense_id] = e_id
+        dense_e_id = dense_e_id.view(-1, self.size)
+
+        dense_neighbors = e_id.new_empty(n_id.numel() * self.size)
+        dense_neighbors[dense_id] = neighbors
+        dense_neighbors = dense_neighbors.view(-1, self.size)
+
+        # Merge new entries with existing ring buffer; keep `size` most recent
+        e_id      = torch.cat([self.e_id[n_id,      :self.size], dense_e_id],      dim=-1)
+        neighbors = torch.cat([self.neighbors[n_id,  :self.size], dense_neighbors], dim=-1)
+
+        e_id, perm         = e_id.topk(self.size, dim=-1)
+        self.e_id[n_id]       = e_id
+        self.neighbors[n_id]  = torch.gather(neighbors, 1, perm)
+
+    def reset_state(self):
+        self.cur_e_id = 0
+        self.e_id.fill_(-1)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

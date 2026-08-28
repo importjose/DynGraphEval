@@ -29,11 +29,34 @@ Usage
 """
 
 import json
-import torch
+import random
 from tgb.linkproppred.evaluate import Evaluator as TGBEvaluator
 
 from .base_model import BaseModel
 from .negative_sampler import RecencyNegativeGenerator, NegativeSampler
+
+
+class _CappedNegSampler:
+    """
+    Thin wrapper that subsamples TGB negatives to a fixed count per edge.
+
+    TGB tgbl-wiki test provides 999 negatives per edge in py-tgb 2.2+.
+    Capping to num_neg (default 100) makes Standard MRR and Recency MRR
+    use the same pool size and therefore directly comparable.
+    """
+
+    def __init__(self, sampler, num_neg: int, seed: int = 42):
+        self._sampler = sampler
+        self._num_neg = num_neg
+        self._rng     = random.Random(seed)
+
+    def query_batch(self, pos_src, pos_dst, pos_t, split_mode):
+        full = self._sampler.query_batch(pos_src, pos_dst, pos_t, split_mode=split_mode)
+        return [
+            self._rng.sample(list(neg), min(self._num_neg, len(neg)))
+            if len(neg) > self._num_neg else list(neg)
+            for neg in full
+        ]
 
 
 class Evaluator:
@@ -73,6 +96,8 @@ class Evaluator:
         self.test_data     = test_data
         self.dataset_name  = dataset_name
         self.neg_cache_dir = neg_cache_dir
+        self.num_neg       = num_neg
+        self.seed          = seed
 
         # TGB evaluator: computes MRR from y_pred_pos and y_pred_neg
         self.tgb_evaluator = TGBEvaluator(name=dataset_name)
@@ -116,7 +141,13 @@ class Evaluator:
         # Load them from TGB's pre-generated test file.
         print("\n[1/2] Standard MRR (TGB hist_rnd negatives)...")
         self.dataset.load_test_ns()
-        tgb_neg_sampler = self.dataset.negative_sampler
+        # Cap TGB negatives to num_neg so Standard MRR and Recency MRR are
+        # evaluated on the same pool size and are directly comparable.
+        # TGB tgbl-wiki test provides 999 negatives per edge in py-tgb 2.2+.
+        tgb_neg_sampler = _CappedNegSampler(
+            self.dataset.negative_sampler, self.num_neg, self.seed
+        )
+        print(f"  (capped TGB negatives to {self.num_neg} per edge)")
 
         # Warmup before this eval pass to ensure a clean neighbor_loader state
         model.warmup(self.train_data, self.val_data)

@@ -43,6 +43,9 @@ def parse_args():
     p.add_argument("--seed",           type=int,   default=0)
     p.add_argument("--repo_dir",       default="/tmp/TGB_TPNet",
                    help="Where to clone the TPNet repo")
+    p.add_argument("--datasets_cache", default=None,
+                   help="Persistent directory for TGB datasets (symlinked into repo). "
+                        "Set to a Drive path to avoid re-downloading each session.")
     return p.parse_args()
 
 
@@ -98,6 +101,18 @@ def main():
     # ── Create required directories inside the repo ───────────────────────────
     for d in ["logs", "saved_models", "saved_results"]:
         os.makedirs(os.path.join(args.repo_dir, d), exist_ok=True)
+
+    # ── Symlink persistent dataset cache into the repo ────────────────────────
+    # TPNet's DataLoader uses root="datasets" relative to the repo dir.
+    # Symlinking it to a Drive-backed dir means TGB only downloads once.
+    if args.datasets_cache:
+        repo_datasets = os.path.join(args.repo_dir, "datasets")
+        if not os.path.exists(repo_datasets):
+            os.makedirs(args.datasets_cache, exist_ok=True)
+            os.symlink(args.datasets_cache, repo_datasets)
+            print(f"  [datasets] symlinked → {args.datasets_cache}")
+        else:
+            print(f"  [datasets] already exists at {repo_datasets}")
 
     # ── Apply our patches over the cloned repo ────────────────────────────────
     # Copies models/tgn/patches/{train_link_prediction.py,evaluate_models_utils.py}

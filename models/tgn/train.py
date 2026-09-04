@@ -87,10 +87,16 @@ def main():
     args = parse_args()
 
     # ── Auto-detect GPU ───────────────────────────────────────────────────────
+    import torch
     if args.gpu is None:
-        import torch
         args.gpu = 0 if torch.cuda.is_available() else -1
-    print(f"GPU: {args.gpu} ({'cuda' if args.gpu >= 0 else 'cpu'})")
+    if args.gpu < 0 or not torch.cuda.is_available():
+        raise SystemExit(
+            "ERROR: No CUDA GPU found. TGN training requires a GPU.\n"
+            "  In Colab: Runtime → Change runtime type → GPU (T4 or better).\n"
+            "  Then re-run all cells from Setup."
+        )
+    print(f"GPU: {args.gpu} ({torch.cuda.get_device_name(args.gpu)})")
 
     # ── Checkpoint destination (relative to DynGraphEval root) ───────────────
     # train.py lives at models/tgn/train.py; root is two levels up

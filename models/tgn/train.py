@@ -38,8 +38,8 @@ def parse_args():
     p.add_argument("--num_neighbors",  type=int,   default=20)
     p.add_argument("--dropout",        type=float, default=0.1)
     p.add_argument("--lr",             type=float, default=0.0001)
-    p.add_argument("--device",         default=None,
-                   help="cuda / cpu (default: auto-detect)")
+    p.add_argument("--gpu",            type=int,   default=None,
+                   help="GPU index to use (default: 0 if CUDA available, else CPU)")
     p.add_argument("--seed",           type=int,   default=0)
     p.add_argument("--repo_dir",       default="/tmp/TGB_TPNet",
                    help="Where to clone the TPNet repo")
@@ -49,11 +49,11 @@ def parse_args():
 def main():
     args = parse_args()
 
-    # ── Auto-detect device ────────────────────────────────────────────────────
-    if args.device is None:
+    # ── Auto-detect GPU ───────────────────────────────────────────────────────
+    if args.gpu is None:
         import torch
-        args.device = "cuda" if torch.cuda.is_available() else "cpu"
-    print(f"Device: {args.device}")
+        args.gpu = 0 if torch.cuda.is_available() else -1
+    print(f"GPU: {args.gpu} ({'cuda' if args.gpu >= 0 else 'cpu'})")
 
     # ── Checkpoint destination (relative to DynGraphEval root) ───────────────
     # train.py lives at models/tgn/train.py; root is two levels up
@@ -91,7 +91,7 @@ def main():
         f"  --dropout {args.dropout} "
         f"  --learning_rate {args.lr} "
         f"  --sample_neighbor_strategy recent "
-        f"  --device {args.device} "
+        f"  --gpu {args.gpu} "
         f"  --prefix {prefix}"
     )
     print(f"\nStarting training on {args.dataset}...\n")

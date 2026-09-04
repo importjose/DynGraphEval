@@ -60,6 +60,12 @@ LOG_EVERY_N_BATCHES = 200
 # Validation DataLoader batch size for large datasets (edges per batch × 999 negatives)
 VAL_BATCH_SIZE = 10
 
+# Only validate every N epochs (saves time; early stopping still works)
+VAL_EVERY_N_EPOCHS = 5
+
+# Use this fraction of val edges for early stopping (1.0 = full val set)
+VAL_SUBSET = 0.1
+
 
 def _gpu_mem_str(device):
     if not torch.cuda.is_available():
@@ -122,7 +128,13 @@ if __name__ == "__main__":
     else:
         _val_bs = args.batch_size
 
+    # Use a subset of val for early stopping — representative but much faster.
+    # Full val is only used for the final evaluation after training completes.
+    _val_n = int(len(val_data.src_node_ids) * VAL_SUBSET)
     val_idx_data_loader = get_idx_data_loader(
+        indices_list=list(range(_val_n)),
+        batch_size=_val_bs, shuffle=False)
+    val_idx_data_loader_full = get_idx_data_loader(
         indices_list=list(range(len(val_data.src_node_ids))),
         batch_size=_val_bs, shuffle=False)
     test_idx_data_loader = get_idx_data_loader(
@@ -131,9 +143,10 @@ if __name__ == "__main__":
 
     print(f"\nDataset:        {args.dataset_name}")
     print(f"Train edges:    {len(train_data.src_node_ids):,}")
-    print(f"Val edges:      {len(val_data.src_node_ids):,}")
+    print(f"Val edges:      {len(val_data.src_node_ids):,}  (using {VAL_SUBSET*100:.0f}% = {_val_n:,} for early stopping)")
     print(f"Train batch:    {args.batch_size}  |  Val batch: {_val_bs}  (× 999 negatives)")
     print(f"Batches/epoch:  train={len(train_idx_data_loader):,}  val={len(val_idx_data_loader):,}")
+    print(f"Val frequency:  every {VAL_EVERY_N_EPOCHS} epoch(s)")
 
     evaluator = Evaluator(name=args.dataset_name)
     val_metric_all_runs, test_metric_all_runs = [], []
@@ -408,7 +421,21 @@ if __name__ == "__main__":
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
 
-            # ── Memory backup before val (model needs clean memory for checkpoint) ─
+            logger.info(f'Epoch: {epoch + 1}, lr: {optimizer.param_groups[0]["lr"]}, '
+                        f'train loss: {mean_train_loss:.4f}')
+            for metric_name in train_metrics[0].keys():
+                logger.info(f'train {metric_name}: '
+                            f'{np.mean([m[metric_name] for m in train_metrics]):.4f}')
+
+            # ── Validation (every VAL_EVERY_N_EPOCHS epochs) ──────────────────
+            if (epoch + 1) % VAL_EVERY_N_EPOCHS != 0:
+                print(f"  Skipping validation this epoch (val every {VAL_EVERY_N_EPOCHS} epochs).")
+                wandb_logger.log_epoch(
+                    train_losses=train_losses, train_metrics=train_metrics,
+                    val_losses=[], val_metrics=[], epoch=epoch)
+                continue
+
+            # ── Memory backup before val ──────────────────────────────────────
             if args.model_name in ['JODIE', 'DyRep', 'TGN', 'PINT']:
                 train_backup_memory_bank = model[0].memory_bank.backup_memory_bank()
                 if args.model_name == 'PINT':
@@ -418,8 +445,7 @@ if __name__ == "__main__":
             if args.use_random_projection:
                 train_backup_random_projections = random_projections.backup_random_projections()
 
-            # ── Validation ────────────────────────────────────────────────────
-            print(f"  Validating ({len(val_idx_data_loader)} batches × {_val_bs} edges × 999 negatives)...")
+            print(f"  Validating ({len(val_idx_data_loader)} batches × {_val_bs} edges × 999 negatives, {VAL_SUBSET*100:.0f}% of val)...")
             val_start = time.time()
             val_losses, val_metrics = evaluate_model_link_prediction(
                 dataset_name=args.dataset_name, model_name=args.model_name,
@@ -454,11 +480,6 @@ if __name__ == "__main__":
                 random_projections.reload_random_projections(train_backup_random_projections)
                 del train_backup_random_projections
 
-            logger.info(f'Epoch: {epoch + 1}, lr: {optimizer.param_groups[0]["lr"]}, '
-                        f'train loss: {mean_train_loss:.4f}')
-            for metric_name in train_metrics[0].keys():
-                logger.info(f'train {metric_name}: '
-                            f'{np.mean([m[metric_name] for m in train_metrics]):.4f}')
             logger.info(f'validate loss: {np.mean(val_losses):.4f}')
             for metric_name in val_metrics[0].keys():
                 logger.info(f'validate {metric_name}: '
@@ -484,12 +505,12 @@ if __name__ == "__main__":
 
         logger.info(f'---------get final performance on dataset {args.dataset_name}-------')
 
-        print("Running final val evaluation...")
+        print("Running final val evaluation (full val set)...")
         val_losses, val_metrics = evaluate_model_link_prediction(
             dataset_name=args.dataset_name, model_name=args.model_name,
             model=model, dtype='val', eval_metric_name=eval_metric_name,
             neighbor_sampler=full_neighbor_sampler,
-            evaluate_idx_data_loader=val_idx_data_loader,
+            evaluate_idx_data_loader=val_idx_data_loader_full,
             evaluate_neg_edge_sampler=eval_neg_edge_sampler,
             evaluator=evaluator, evaluate_data=val_data,
             loss_func=loss_func, num_neighbors=args.num_neighbors,

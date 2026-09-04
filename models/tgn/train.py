@@ -37,7 +37,7 @@ def parse_args():
     p.add_argument("--dataset",        default="tgbl-wiki")
     p.add_argument("--epochs",         type=int,   default=50)
     p.add_argument("--patience",       type=int,   default=5)
-    p.add_argument("--batch_size",     type=int,   default=50)
+    p.add_argument("--batch_size",     type=int,   default=200)
     p.add_argument("--num_layers",     type=int,   default=2)
     p.add_argument("--num_heads",      type=int,   default=2)
     p.add_argument("--output_dim",     type=int,   default=100)

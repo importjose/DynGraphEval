@@ -19,6 +19,11 @@ import os
 import shutil
 import subprocess
 import sys
+import time
+
+
+def _log(msg: str) -> None:
+    print(f"[{time.strftime('%H:%M:%S')}] {msg}", flush=True)
 
 
 def run(cmd: str) -> None:
@@ -82,48 +87,50 @@ def main():
             "  In Colab: Runtime → Change runtime type → GPU (T4 or better).\n"
             "  Then re-run all cells from Setup."
         )
-    print(f"GPU: {args.gpu} ({torch.cuda.get_device_name(args.gpu)})")
+    _log(f"GPU {args.gpu}: {torch.cuda.get_device_name(args.gpu)}")
 
-    # ── Checkpoint destination (relative to DynGraphEval root) ───────────────
-    # train.py lives at models/tgn/train.py; root is two levels up
-    script_dir   = os.path.dirname(os.path.abspath(__file__))
-    root_dir     = os.path.dirname(os.path.dirname(script_dir))
-    ckpt_dir     = os.path.join(root_dir, "models", "tgn", "checkpoints", args.dataset)
+    # ── Checkpoint destination ────────────────────────────────────────────────
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    root_dir   = os.path.dirname(os.path.dirname(script_dir))
+    ckpt_dir   = os.path.join(root_dir, "models", "tgn", "checkpoints", args.dataset)
     os.makedirs(ckpt_dir, exist_ok=True)
+    _log(f"Checkpoint dir: {ckpt_dir}")
 
     # ── Clone / update TPNet repo ─────────────────────────────────────────────
     repo_url = "https://github.com/lxd99/TGB_TPNet.git"
     if os.path.exists(args.repo_dir):
+        _log(f"Updating TPNet repo at {args.repo_dir}...")
         run(f"git -C {args.repo_dir} pull --quiet")
+        _log("Repo up to date.")
     else:
+        _log(f"Cloning TPNet repo to {args.repo_dir}...")
         run(f"git clone --quiet {repo_url} {args.repo_dir}")
+        _log("Clone complete.")
 
     # ── Create required directories inside the repo ───────────────────────────
     for d in ["logs", "saved_models", "saved_results"]:
         os.makedirs(os.path.join(args.repo_dir, d), exist_ok=True)
 
     # ── Symlink persistent dataset cache into the repo ────────────────────────
-    # TPNet's DataLoader uses root="datasets" relative to the repo dir.
-    # Symlinking it to a Drive-backed dir means TGB only downloads once.
     if args.datasets_cache:
         repo_datasets = os.path.join(args.repo_dir, "datasets")
         if not os.path.exists(repo_datasets):
             os.makedirs(args.datasets_cache, exist_ok=True)
             os.symlink(args.datasets_cache, repo_datasets)
-            print(f"  [datasets] symlinked → {args.datasets_cache}")
+            _log(f"Dataset cache symlinked: {repo_datasets} → {args.datasets_cache}")
         else:
-            print(f"  [datasets] already exists at {repo_datasets}")
+            _log(f"Dataset cache already in place: {repo_datasets}")
 
     # ── Apply our patches over the cloned repo ────────────────────────────────
-    # Copies models/tgn/patches/{train_link_prediction.py,evaluate_models_utils.py}
-    # over the originals. Patches add: smaller val batch size, stdout progress
-    # logging, GPU memory cleanup between val batches.
-    print("Applying patches...")
+    _log("Applying patches...")
     _apply_patches(args.repo_dir)
-    print("Patches applied.")
+    _log("Patches applied.")
 
-    # ── Run their training script ─────────────────────────────────────────────
+    # ── Run training ──────────────────────────────────────────────────────────
     prefix = f"run{args.seed}"
+    _log(f"Starting training: {args.model_name if hasattr(args, 'model_name') else 'TGN'} "
+         f"on {args.dataset} | epochs={args.epochs} patience={args.patience} "
+         f"batch={args.batch_size}")
     train_cmd = (
         f"cd {args.repo_dir} && "
         f"PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True "
@@ -145,8 +152,8 @@ def main():
         f"  --gpu {args.gpu} "
         f"  --prefix {prefix}"
     )
-    print(f"\nStarting training on {args.dataset}...\n")
     run(train_cmd)
+    _log("Training complete.")
 
     # ── Copy checkpoint to our models/ structure ──────────────────────────────
     src = os.path.join(
@@ -156,14 +163,14 @@ def main():
     dst = os.path.join(ckpt_dir, f"run{args.seed}.pkl")
 
     if not os.path.exists(src):
-        # Fallback: list what was saved
         saved = os.listdir(os.path.join(args.repo_dir, "saved_models"))
-        print(f"Expected checkpoint not found at {src}")
-        print(f"Files in saved_models: {saved}")
+        _log(f"ERROR: Expected checkpoint not found at {src}")
+        _log(f"Files in saved_models: {saved}")
         sys.exit(1)
 
+    _log(f"Copying checkpoint → {dst}")
     shutil.copy(src, dst)
-    print(f"\nCheckpoint saved to: {dst}")
+    _log(f"Done. Checkpoint saved to: {dst}")
     print(f"\nTo evaluate, set config.yaml:")
     print(f"  model: tgn")
     print(f"  checkpoints:")

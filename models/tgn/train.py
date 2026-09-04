@@ -27,7 +27,9 @@ def _log(msg: str) -> None:
 
 
 def run(cmd: str) -> None:
-    subprocess.run(cmd, shell=True, check=True)
+    env = os.environ.copy()
+    env["PYTHONUNBUFFERED"] = "1"
+    subprocess.run(cmd, shell=True, check=True, env=env)
 
 
 def parse_args():

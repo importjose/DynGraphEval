@@ -430,9 +430,6 @@ if __name__ == "__main__":
             # ── Validation (every VAL_EVERY_N_EPOCHS epochs) ──────────────────
             if (epoch + 1) % VAL_EVERY_N_EPOCHS != 0:
                 print(f"  Skipping validation this epoch (val every {VAL_EVERY_N_EPOCHS} epochs).")
-                wandb_logger.log_epoch(
-                    train_losses=train_losses, train_metrics=train_metrics,
-                    val_losses=[], val_metrics=[], epoch=epoch)
                 continue
 
             # ── Memory backup before val ──────────────────────────────────────

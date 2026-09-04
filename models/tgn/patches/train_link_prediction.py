@@ -67,6 +67,59 @@ VAL_EVERY_N_EPOCHS = 5
 VAL_SUBSET = 0.1
 
 
+def _resume_ckpt_path(saved_models_dir: str, prefix: str, epoch: int) -> str:
+    return os.path.join(saved_models_dir, f"{prefix}_resume_epoch{epoch}.pkl")
+
+
+def _save_resume_checkpoint(saved_models_dir, prefix, epoch, model, optimizer,
+                             memory_bank_backup, early_stopping, model_name):
+    """Save everything needed to resume training from the next epoch."""
+    path = _resume_ckpt_path(saved_models_dir, prefix, epoch)
+    payload = {
+        'epoch':           epoch,
+        'model':           model.state_dict(),
+        'optimizer':       optimizer.state_dict(),
+        'early_stopping':  {
+            'counter':      early_stopping.counter,
+            'best_metrics': early_stopping.best_metrics,
+            'best_epoch':   early_stopping.best_epoch,
+        },
+    }
+    if model_name in ['JODIE', 'DyRep', 'TGN', 'PINT']:
+        payload['memory_bank'] = memory_bank_backup
+    torch.save(payload, path)
+    print(f"  [ckpt] Resume checkpoint saved → {os.path.basename(path)}", flush=True)
+
+
+def _find_latest_resume_checkpoint(saved_models_dir: str, prefix: str):
+    """Return (epoch, path) of the latest resume checkpoint, or (None, None)."""
+    import glob
+    pattern = os.path.join(saved_models_dir, f"{prefix}_resume_epoch*.pkl")
+    files = glob.glob(pattern)
+    if not files:
+        return None, None
+    # extract epoch numbers and pick the highest
+    def _epoch(p):
+        name = os.path.basename(p)
+        return int(name.replace(f"{prefix}_resume_epoch", "").replace(".pkl", ""))
+    files.sort(key=_epoch)
+    latest = files[-1]
+    return _epoch(latest), latest
+
+
+def _load_resume_checkpoint(path, model, optimizer, early_stopping, model_name, device):
+    """Load resume checkpoint and restore model/optimizer/memory/early-stopping state."""
+    payload = torch.load(path, map_location=device)
+    model.load_state_dict(payload['model'])
+    optimizer.load_state_dict(payload['optimizer'])
+    es = payload['early_stopping']
+    early_stopping.counter      = es['counter']
+    early_stopping.best_metrics = es['best_metrics']
+    early_stopping.best_epoch   = es['best_epoch']
+    mem_backup = payload.get('memory_bank', None)
+    return mem_backup  # caller restores this into memory_bank
+
+
 def _gpu_mem_str(device):
     if not torch.cuda.is_available():
         return ""
@@ -274,8 +327,25 @@ if __name__ == "__main__":
         wandb_logger = WandbLinkLogger('run', args)
         wandb_logger.watch(model)
 
+        # ── Resume from checkpoint if available ───────────────────────────────
+        saved_models_dir = "./saved_models"
+        resume_epoch, resume_path = _find_latest_resume_checkpoint(saved_models_dir, args.prefix)
+        start_epoch = 0
+        resume_memory_backup = None
+        if resume_path:
+            print(f"\nResuming from checkpoint: {os.path.basename(resume_path)}", flush=True)
+            resume_memory_backup = _load_resume_checkpoint(
+                resume_path, model, optimizer, early_stopping,
+                args.model_name, args.device)
+            start_epoch = resume_epoch + 1
+            print(f"  Resuming from epoch {start_epoch + 1}/{args.num_epochs} | "
+                  f"best_epoch={early_stopping.best_epoch} | "
+                  f"patience_counter={early_stopping.counter}/{args.patience}", flush=True)
+        else:
+            print(f"\nNo resume checkpoint found — starting from epoch 1.", flush=True)
+
         # ── Training loop ─────────────────────────────────────────────────────
-        for epoch in range(args.num_epochs):
+        for epoch in range(start_epoch, args.num_epochs):
             epoch_start = time.time()
             print(f"\n── Epoch {epoch + 1}/{args.num_epochs} ──────────────────────────")
 
@@ -283,7 +353,13 @@ if __name__ == "__main__":
             if args.model_name in ['DyRep', 'TGAT', 'TGN', 'TPNet', 'CAWN', 'TCL', 'GraphMixer', 'DyGFormer', 'PINT']:
                 model[0].set_neighbor_sampler(train_neighbor_sampler)
             if args.model_name in ['JODIE', 'DyRep', 'TGN', 'PINT']:
-                model[0].memory_bank.__init_memory_bank__()
+                if resume_memory_backup is not None:
+                    # Restore memory state from resume checkpoint (first resumed epoch only)
+                    model[0].memory_bank.reload_memory_bank(resume_memory_backup)
+                    resume_memory_backup = None
+                    print(f"  [ckpt] Memory bank restored from checkpoint.", flush=True)
+                else:
+                    model[0].memory_bank.__init_memory_bank__()
             if args.model_name == 'NAT':
                 model[0].init_ncache()
             if args.use_random_projection:
@@ -417,7 +493,7 @@ if __name__ == "__main__":
                   f"loss: {mean_train_loss:.4f} | {eval_metric_name}: {mean_train_mrr:.4f}"
                   f"{_gpu_mem_str(args.device)}")
 
-            # Free GPU memory before validation
+            # Free GPU memory before checkpointing / validation
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
 
@@ -427,6 +503,16 @@ if __name__ == "__main__":
                 logger.info(f'train {metric_name}: '
                             f'{np.mean([m[metric_name] for m in train_metrics]):.4f}')
 
+            # ── Memory backup (needed for both checkpointing and val restore) ─
+            mem_backup_for_ckpt = None
+            if args.model_name in ['JODIE', 'DyRep', 'TGN', 'PINT']:
+                mem_backup_for_ckpt = model[0].memory_bank.backup_memory_bank()
+
+            # ── Save resume checkpoint after every training epoch ─────────────
+            _save_resume_checkpoint(
+                saved_models_dir, args.prefix, epoch, model, optimizer,
+                mem_backup_for_ckpt, early_stopping, args.model_name)
+
             # ── Validation (every VAL_EVERY_N_EPOCHS epochs) ──────────────────
             if (epoch + 1) % VAL_EVERY_N_EPOCHS != 0:
                 print(f"  Skipping validation this epoch (val every {VAL_EVERY_N_EPOCHS} epochs).")
@@ -434,7 +520,7 @@ if __name__ == "__main__":
 
             # ── Memory backup before val ──────────────────────────────────────
             if args.model_name in ['JODIE', 'DyRep', 'TGN', 'PINT']:
-                train_backup_memory_bank = model[0].memory_bank.backup_memory_bank()
+                train_backup_memory_bank = mem_backup_for_ckpt
                 if args.model_name == 'PINT':
                     train_backup_matrix_memory = model[0].matrix_memory.backup_memory()
             if args.model_name == 'NAT':

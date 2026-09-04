@@ -113,8 +113,9 @@ def main():
     for d in ["logs", "saved_models", "saved_results"]:
         os.makedirs(os.path.join(args.repo_dir, d), exist_ok=True)
 
-    # ── Symlink persistent dataset cache into the repo ────────────────────────
+    # ── Symlink persistent dirs into the repo ────────────────────────────────
     if args.datasets_cache:
+        # datasets: TGB downloads once, reused from Drive
         repo_datasets = os.path.join(args.repo_dir, "datasets")
         if not os.path.exists(repo_datasets):
             os.makedirs(args.datasets_cache, exist_ok=True)
@@ -122,6 +123,17 @@ def main():
             _log(f"Dataset cache symlinked: {repo_datasets} → {args.datasets_cache}")
         else:
             _log(f"Dataset cache already in place: {repo_datasets}")
+
+        # saved_models: checkpoints (best + resume) persist across sessions
+        drive_models = os.path.join(os.path.dirname(args.datasets_cache), "tpnet_saved_models")
+        repo_models  = os.path.join(args.repo_dir, "saved_models")
+        if not os.path.islink(repo_models):
+            shutil.rmtree(repo_models, ignore_errors=True)
+            os.makedirs(drive_models, exist_ok=True)
+            os.symlink(drive_models, repo_models)
+            _log(f"saved_models symlinked: {repo_models} → {drive_models}")
+        else:
+            _log(f"saved_models already symlinked: {repo_models}")
 
     # ── Apply our patches over the cloned repo ────────────────────────────────
     _log("Applying patches...")

@@ -46,6 +46,43 @@ def parse_args():
     return p.parse_args()
 
 
+def _patch_val_batch_size(repo_dir: str, val_batch_size: int = 5) -> None:
+    """
+    Patch train_link_prediction.py to use a smaller validation batch size.
+
+    The repo hardcodes batch_size=20 for tgbl-wiki / tgbl-review val/test
+    DataLoaders, but 20 * 999 negatives still OOMs on 40 GB GPUs after a full
+    training epoch (fragmented memory + model state ~25 GB in use).
+    Reducing to val_batch_size (default 5) means 5 * 999 = 4,995 negatives
+    per forward pass, which fits comfortably.
+    """
+    target = os.path.join(repo_dir, "train_link_prediction.py")
+    with open(target) as f:
+        src = f.read()
+
+    old = (
+        "    if args.dataset_name == \"tgbl-wiki\" or args.dataset_name == 'tgbl-review':\n"
+        "        val_idx_data_loader = get_idx_data_loader(indices_list=list(range(len(val_data.src_node_ids))), batch_size=20,\n"
+        "                                                  shuffle=False)\n"
+        "        test_idx_data_loader = get_idx_data_loader(indices_list=list(range(len(test_data.src_node_ids))), batch_size=20,\n"
+        "                                                   shuffle=False)\n"
+    )
+    new = (
+        f"    if args.dataset_name == \"tgbl-wiki\" or args.dataset_name == 'tgbl-review':\n"
+        f"        val_idx_data_loader = get_idx_data_loader(indices_list=list(range(len(val_data.src_node_ids))), batch_size={val_batch_size},\n"
+        f"                                                  shuffle=False)\n"
+        f"        test_idx_data_loader = get_idx_data_loader(indices_list=list(range(len(test_data.src_node_ids))), batch_size={val_batch_size},\n"
+        f"                                                   shuffle=False)\n"
+    )
+    if old not in src:
+        print(f"  [patch] Expected pattern not found in {target} — skipping patch.")
+        return
+    patched = src.replace(old, new, 1)
+    with open(target, "w") as f:
+        f.write(patched)
+    print(f"  [patch] Val/test DataLoader batch_size → {val_batch_size} in {target}")
+
+
 def main():
     args = parse_args()
 
@@ -72,6 +109,12 @@ def main():
     # ── Create required directories inside the repo ───────────────────────────
     for d in ["logs", "saved_models", "saved_results"]:
         os.makedirs(os.path.join(args.repo_dir, d), exist_ok=True)
+
+    # ── Patch TPNet's train_link_prediction.py to fix validation OOM ─────────
+    # The repo hardcodes batch_size=20 for tgbl-wiki val/test loaders, but
+    # 20 * 999 negatives still OOMs on 40GB GPUs after a full training epoch.
+    # Reducing to 5 per batch (5 * 999 = 4,995 negatives) fits comfortably.
+    _patch_val_batch_size(args.repo_dir)
 
     # ── Run their training script ─────────────────────────────────────────────
     prefix = f"run{args.seed}"

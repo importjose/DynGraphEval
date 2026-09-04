@@ -192,6 +192,9 @@ class TPNetTGN(BaseModel):
                     )
                     self.backbone.memory_bank.detach_memory_bank()
 
+        if self.device.type == "cuda":
+            torch.cuda.empty_cache()
+
     @torch.no_grad()
     def evaluate(
         self, eval_data: TemporalData, neg_sampler, split_mode: str, evaluator
@@ -244,6 +247,7 @@ class TPNetTGN(BaseModel):
                     src_node_ids=src_1, dst_node_ids=dst_1, node_interact_times=t_1,
                     edge_ids=None, edges_are_positive=False, num_neighbors=self.num_neighbors)
                 pos_score = self.link_predictor(src_emb_p, dst_emb_p).squeeze(-1).item()
+                del src_emb_p, dst_emb_p
 
                 # Score negatives (same src, same time, different dsts)
                 neg_srcs = np.full(len(neg_dsts), batch_src[idx], dtype=np.int64)
@@ -252,6 +256,7 @@ class TPNetTGN(BaseModel):
                     src_node_ids=neg_srcs, dst_node_ids=neg_dsts, node_interact_times=neg_ts,
                     edge_ids=None, edges_are_positive=False, num_neighbors=self.num_neighbors)
                 neg_scores = self.link_predictor(src_emb_n, dst_emb_n).squeeze(-1).cpu().numpy()
+                del src_emb_n, dst_emb_n
 
                 input_dict = {
                     "y_pred_pos":  np.array([pos_score]),
@@ -270,5 +275,8 @@ class TPNetTGN(BaseModel):
                 num_neighbors      = self.num_neighbors,
             )
             self.backbone.memory_bank.detach_memory_bank()
+
+            if self.device.type == "cuda":
+                torch.cuda.empty_cache()
 
         return float(np.mean(perf_list)) if perf_list else 0.0

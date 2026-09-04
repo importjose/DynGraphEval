@@ -30,6 +30,7 @@ Usage
 
 import json
 import random
+import torch
 from tgb.linkproppred.evaluate import Evaluator as TGBEvaluator
 
 from .base_model import BaseModel
@@ -155,6 +156,8 @@ class Evaluator:
             self.test_data, tgb_neg_sampler, "test", self.tgb_evaluator
         )
         print(f"  Standard MRR = {standard_mrr:.4f}")
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
         # ── 2. Recency MRR (negatives from source's recent history) ──────────
         # Generate negatives (or load from cache if already generated).

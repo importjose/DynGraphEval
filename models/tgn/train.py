@@ -30,7 +30,7 @@ def parse_args():
     p.add_argument("--dataset",        default="tgbl-wiki")
     p.add_argument("--epochs",         type=int,   default=50)
     p.add_argument("--patience",       type=int,   default=5)
-    p.add_argument("--batch_size",     type=int,   default=100)
+    p.add_argument("--batch_size",     type=int,   default=50)
     p.add_argument("--num_layers",     type=int,   default=2)
     p.add_argument("--num_heads",      type=int,   default=2)
     p.add_argument("--output_dim",     type=int,   default=100)
@@ -76,7 +76,9 @@ def main():
     # ── Run their training script ─────────────────────────────────────────────
     prefix = f"run{args.seed}"
     train_cmd = (
-        f"cd {args.repo_dir} && {sys.executable} train_link_prediction.py "
+        f"cd {args.repo_dir} && "
+        f"PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True "
+        f"{sys.executable} train_link_prediction.py "
         f"  --model_name TGN "
         f"  --dataset_name {args.dataset} "
         f"  --num_runs 1 "

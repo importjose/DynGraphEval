@@ -24,9 +24,9 @@ from torch import Tensor
 from torch_geometric.data import TemporalData
 from torch_geometric.loader import TemporalDataLoader
 
-from ..base_model import BaseModel
-from ..partition import build_src_sets, partition_by_source
-from .components import FedLinkModel
+from ..base import BaseModel
+from evaluate.partition import build_src_sets, partition_by_source
+from ..components import FedLinkModel
 
 
 def _build_undirected_edge_index(tdata: TemporalData, device: torch.device) -> Tensor:

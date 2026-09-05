@@ -18,7 +18,7 @@ import torch
 from torch_geometric.data import TemporalData
 from torch_geometric.loader import TemporalDataLoader
 
-from ..base_model import BaseModel
+from ..base import BaseModel
 from .tpnet_components import MemoryModel, NeighborSampler, LinkPredictor
 
 

@@ -52,7 +52,11 @@ def parse_args():
                    help="Where to clone the TPNet repo")
     p.add_argument("--datasets_cache", default=None,
                    help="Persistent directory for TGB datasets (symlinked into repo). "
-                        "Set to a Drive path to avoid re-downloading each session.")
+                        "Set to a Drive path or Modal Volume path to avoid re-downloading.")
+    p.add_argument("--checkpoints_dir", default=None,
+                   help="Directory to write the final checkpoint into. "
+                        "Defaults to models/tgn/checkpoints/{dataset}/ relative to repo root. "
+                        "Override with a Volume path when running on Modal.")
     return p.parse_args()
 
 
@@ -92,9 +96,14 @@ def main():
     _log(f"GPU {args.gpu}: {torch.cuda.get_device_name(args.gpu)}")
 
     # ── Checkpoint destination ────────────────────────────────────────────────
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    root_dir   = os.path.dirname(os.path.dirname(script_dir))
-    ckpt_dir   = os.path.join(root_dir, "models", "tgn", "checkpoints", args.dataset)
+    if args.checkpoints_dir:
+        # Caller-supplied path (e.g. Modal Volume: /data/checkpoints/tgbl-wiki)
+        ckpt_dir = os.path.join(args.checkpoints_dir, args.dataset)
+    else:
+        # Default: models/tgn/checkpoints/{dataset}/ relative to repo root
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        root_dir   = os.path.dirname(os.path.dirname(script_dir))
+        ckpt_dir   = os.path.join(root_dir, "models", "tgn", "checkpoints", args.dataset)
     os.makedirs(ckpt_dir, exist_ok=True)
     _log(f"Checkpoint dir: {ckpt_dir}")
 
@@ -125,7 +134,10 @@ def main():
             _log(f"Dataset cache already in place: {repo_datasets}")
 
         # saved_models: checkpoints (best + resume) persist across sessions
-        drive_models = os.path.join(os.path.dirname(args.datasets_cache), "tpnet_saved_models")
+        # Use realpath to resolve the symlink so we get the actual Drive path,
+        # not the ephemeral /content path.
+        drive_root   = os.path.dirname(os.path.realpath(args.datasets_cache))
+        drive_models = os.path.join(drive_root, "tpnet_saved_models")
         repo_models  = os.path.join(args.repo_dir, "saved_models")
         if not os.path.islink(repo_models):
             shutil.rmtree(repo_models, ignore_errors=True)

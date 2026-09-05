@@ -24,7 +24,7 @@ class BaseModel(ABC):
     Abstract base class for temporal graph models in DynGraphEval.
 
     Defines the minimal interface the Evaluator needs to run any model.
-    Concrete subclasses live in dyngrapheval/models/.
+    Concrete subclasses live in models/tgn/, models/fl_tgn/, models/fedlink/.
     """
 
     @abstractmethod

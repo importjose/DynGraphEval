@@ -218,6 +218,7 @@ __marimo__/
 .streamlit/secrets.toml
 
 # DynGraphEval
-checkpoints/       # model weights — too large for git, keep on Drive
+checkpoints/       # model weights — too large for git, keep on Modal Volume
 datasets/          # TGB datasets — downloaded at runtime
 neg_cache/         # generated negative samples — reproducible, not needed in git
+results/           # eval output JSONs — regenerate from checkpoints

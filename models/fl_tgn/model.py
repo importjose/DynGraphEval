@@ -23,9 +23,10 @@ import numpy as np
 import torch
 from torch_geometric.data import TemporalData
 from torch_geometric.loader import TemporalDataLoader
-from ..base_model import BaseModel
-from ..partition import build_src_sets, partition_by_source
-from .components import (
+
+from ..base import BaseModel
+from evaluate.partition import build_src_sets, partition_by_source
+from ..components import (
     TGNMemory,
     GraphAttentionEmbedding,
     LinkPredictor,

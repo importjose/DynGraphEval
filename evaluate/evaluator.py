@@ -15,10 +15,10 @@ The Evaluator class runs two evaluation dimensions on any BaseModel:
 
 Usage
 -----
-    from dyngrapheval import Evaluator
-    from dyngrapheval.models import TGN
+    from evaluate.evaluator import Evaluator
+    from models.tgn.model import TPNetTGN
 
-    model = TGN(checkpoint_path='...', ...)
+    model = TPNetTGN(checkpoint_path='...', ...)
     model.load_checkpoint()
     model.warmup(train_data, val_data)
 
@@ -33,7 +33,7 @@ import random
 import torch
 from tgb.linkproppred.evaluate import Evaluator as TGBEvaluator
 
-from .base_model import BaseModel
+from models.base import BaseModel
 from .negative_sampler import RecencyNegativeGenerator, NegativeSampler
 
 

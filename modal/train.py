@@ -59,7 +59,7 @@ app = modal.App("dyngrapheval-train")
 
 @app.cls(
     image=image,
-    gpu="A10G",
+    gpu="A10",
     timeout=86400,      # 24-hour hard limit
     volumes={VOLUME_PATH: volume},
     mounts=[repo_mount],

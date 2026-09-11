@@ -1,6 +1,0 @@
-{
-  "model": "graphmixer",
-  "dataset": "tgbl-wiki",
-  "standard_mrr": 0.5492,
-  "recency_mrr": 0.8208
-}

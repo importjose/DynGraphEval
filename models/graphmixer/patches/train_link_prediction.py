@@ -202,7 +202,7 @@ if __name__ == "__main__":
     print(f"Val frequency:  every {VAL_EVERY_N_EPOCHS} epoch(s)")
 
     evaluator = Evaluator(name=args.dataset_name)
-    val_metric_all_runs, test_metric_all_runs = [], []
+    val_metric_all_runs = []
 
     for run in range(args.num_runs):
         set_random_seed(seed=run, deterministic_alg=args.use_random_projection or args.model_name == 'NAT')
@@ -604,30 +604,13 @@ if __name__ == "__main__":
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
 
-        print("Running final test evaluation...")
-        test_losses, test_metrics = evaluate_model_link_prediction(
-            dataset_name=args.dataset_name, model_name=args.model_name,
-            model=model, dtype='test', eval_metric_name=eval_metric_name,
-            neighbor_sampler=full_neighbor_sampler,
-            evaluate_idx_data_loader=test_idx_data_loader,
-            evaluate_neg_edge_sampler=eval_neg_edge_sampler,
-            evaluator=evaluator, evaluate_data=test_data,
-            loss_func=loss_func, num_neighbors=args.num_neighbors,
-            time_gap=args.time_gap, logger=logger)
-
-        val_metric_dict, test_metric_dict = {}, {}
+        val_metric_dict = {}
 
         logger.info(f'validate loss: {np.mean(val_losses):.4f}')
         for metric_name in val_metrics[0].keys():
             avg = np.mean([m[metric_name] for m in val_metrics])
             logger.info(f'validate {metric_name}: {avg:.4f}')
             val_metric_dict[metric_name] = avg
-
-        logger.info(f'test loss: {np.mean(test_losses):.4f}')
-        for metric_name in test_metrics[0].keys():
-            avg = np.mean([m[metric_name] for m in test_metrics])
-            logger.info(f'test {metric_name}: {avg:.4f}')
-            test_metric_dict[metric_name] = avg
 
         single_run_time = time.time() - run_start_time
         max_mem_mb = torch.cuda.max_memory_allocated(device=args.device) / 1024 / 1024 \
@@ -637,7 +620,7 @@ if __name__ == "__main__":
         print(f"Run {run + 1} complete in {single_run_time/60:.1f} min  |  "
               f"Peak GPU mem: {max_mem_mb:.0f} MB")
         print(f"  Val  {eval_metric_name}: {val_metric_dict.get(eval_metric_name, 0):.4f}")
-        print(f"  Test {eval_metric_name}: {test_metric_dict.get(eval_metric_name, 0):.4f}")
+        print(f"  (test eval skipped — use modal/eval.py for test set scoring)")
         print(f"{'='*60}")
 
         logger.info(f'Run {run + 1} cost {single_run_time:.2f}s. '
@@ -645,15 +628,13 @@ if __name__ == "__main__":
 
         wandb_logger.log_run(
             val_losses=val_losses, val_metrics=val_metrics,
-            test_losses=test_losses, test_metrics=test_metrics)
+            test_losses=[], test_metrics=[])
         wandb_logger.finish()
 
         val_metric_all_runs.append(val_metric_dict)
-        test_metric_all_runs.append(test_metric_dict)
 
         result_json = json.dumps({
             "validate metrics": {k: str(v) for k, v in val_metric_dict.items()},
-            "test metrics": {k: str(v) for k, v in test_metric_dict.items()},
         }, indent=4)
         save_result_path = (
             f"./saved_results/{args.prefix}_link_{args.dataset_name}"
@@ -670,10 +651,6 @@ if __name__ == "__main__":
                 f'average validate {metric_name}: '
                 f'{np.mean([r[metric_name] for r in val_metric_all_runs]):.4f} '
                 f'± {np.std([r[metric_name] for r in val_metric_all_runs], ddof=1):.4f}')
-            logger.info(
-                f'average test {metric_name}: '
-                f'{np.mean([r[metric_name] for r in test_metric_all_runs]):.4f} '
-                f'± {np.std([r[metric_name] for r in test_metric_all_runs], ddof=1):.4f}')
-        wandb_logger.log_final(val_metrics=val_metric_all_runs, test_metrics=test_metric_all_runs)
+        wandb_logger.log_final(val_metrics=val_metric_all_runs, test_metrics=[])
 
     sys.exit()

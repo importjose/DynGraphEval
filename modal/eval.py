@@ -57,7 +57,7 @@ def evaluate(
     checkpoint:     str   = None,
     dataset:        str   = "tgbl-wiki",
     num_neg:        int   = 999,
-    seed:           int   = 42,
+    seed:           int   = None,
     skip_standard:  bool  = False,
     standard_mrr:   float = None,
 ) -> dict:
@@ -66,12 +66,14 @@ def evaluate(
 
     Parameters
     ----------
-    model      : 'tgn', 'graphmixer', 'fl_tgn', or 'fedlink'
-    checkpoint : path to checkpoint on the volume.
-                 Defaults to /data/checkpoints/{model}/{dataset}/run0.pkl
+    model      : 'edgebank', 'tgn', 'graphmixer', 'tgat', 'fl_tgn', or 'fedlink'
+    checkpoint : explicit path to checkpoint on the volume.
+                 If omitted, resolved automatically (see below).
     dataset    : TGB dataset name (default 'tgbl-wiki')
-    num_neg    : negatives per edge for both metrics (default 100)
-    seed       : random seed (default 42)
+    num_neg    : negatives per edge for both metrics (default 999)
+    seed       : training seed — selects /data/checkpoints/{model}/{dataset}/run{seed}.pkl.
+                 If None, the most recently modified checkpoint in that directory is used.
+                 Also used as the negative-sampler seed (falls back to 42 when None).
 
     Returns
     -------
@@ -98,9 +100,25 @@ def evaluate(
     num_nodes = int(max(data.src.max(), data.dst.max())) + 1
     device    = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    # ── Default checkpoint path ───────────────────────────────────────────────
-    if checkpoint is None:
-        checkpoint = os.path.join(CHECKPOINTS_DIR, model, dataset, "run0.pkl")
+    # ── Resolve checkpoint path (not used by edgebank) ───────────────────────
+    if checkpoint is None and model != "edgebank":
+        ckpt_dir = os.path.join(CHECKPOINTS_DIR, model, dataset)
+        if seed is not None:
+            checkpoint = os.path.join(ckpt_dir, f"run{seed}.pkl")
+        else:
+            # Default: most recently modified .pkl in the checkpoint directory
+            pkls = sorted(
+                [f for f in os.listdir(ckpt_dir) if f.endswith(".pkl")],
+                key=lambda f: os.path.getmtime(os.path.join(ckpt_dir, f)),
+                reverse=True,
+            )
+            if not pkls:
+                raise FileNotFoundError(f"No checkpoints found in {ckpt_dir}")
+            checkpoint = os.path.join(ckpt_dir, pkls[0])
+            print(f"[eval] No seed specified — using latest checkpoint: {checkpoint}")
+
+    # ── Negative-sampler seed (falls back to 42 when training seed not given) ─
+    neg_seed = seed if seed is not None else 42
 
     # ── Instantiate and load model ────────────────────────────────────────────
     from models.tgn.model import TPNetTGN
@@ -109,8 +127,14 @@ def evaluate(
     from models.tpnet.model import TPNetModel
     from models.fl_tgn.model import FederatedTGN
     from models.fedlink.model import FedLink
+    from models.edgebank.model import EdgeBankModel
 
-    if model == "tgn":
+    if model == "edgebank":
+        # No checkpoint needed — warmup() builds memory from train+val
+        m = EdgeBankModel()
+        m.load_checkpoint()
+
+    elif model == "tgn":
         m = TPNetTGN(
             checkpoint_path=checkpoint,
             num_nodes=num_nodes,
@@ -189,7 +213,7 @@ def evaluate(
         m.load_checkpoint()
 
     else:
-        raise ValueError(f"Unknown model '{model}'. Choose from: tgn, tgat, graphmixer, tpnet, fl_tgn, fedlink")
+        raise ValueError(f"Unknown model '{model}'. Choose from: edgebank, tgn, tgat, graphmixer, tpnet, fl_tgn, fedlink")
 
     # ── Run evaluation ────────────────────────────────────────────────────────
     from evaluate.evaluator import Evaluator
@@ -204,7 +228,7 @@ def evaluate(
         dataset_name=dataset,
         neg_cache_dir=os.path.join(VOLUME_PATH, "neg_cache"),
         num_neg=num_neg,
-        seed=seed,
+        seed=neg_seed,
     )
     results = ev.run(m, model_name=model, skip_standard=skip_standard, standard_mrr=standard_mrr)
 
@@ -227,6 +251,7 @@ def main(
     checkpoint:    str   = None,
     dataset:       str   = "tgbl-wiki",
     num_neg:       int   = 999,
+    seed:          int   = None,
     skip_standard: bool  = False,
     standard_mrr:  float = None,
 ):
@@ -234,15 +259,17 @@ def main(
     CLI entrypoint.
 
     Examples:
-        modal run modal/eval.py --model tgn
-        modal run modal/eval.py --model graphmixer
-        modal run modal/eval.py --model tgn --checkpoint /data/checkpoints/tgn/tgbl-wiki/run0.pkl
+        modal run modal/eval.py --model tgn                    # latest checkpoint
+        modal run modal/eval.py --model tgn --seed 42          # run42.pkl
+        modal run modal/eval.py --model tgn --seed 123         # run123.pkl
+        modal run modal/eval.py --model tgn --checkpoint /data/checkpoints/tgn/tgbl-wiki/run42.pkl
     """
     result = evaluate.remote(
         model=model,
         checkpoint=checkpoint,
         dataset=dataset,
         num_neg=num_neg,
+        seed=seed,
         skip_standard=skip_standard,
         standard_mrr=standard_mrr,
     )

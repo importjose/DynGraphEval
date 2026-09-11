@@ -54,27 +54,19 @@ class RecencyNegativeGenerator:
     Parameters
     ----------
     dataset_name  : str   used in the output filename
-    first_dst_id  : int   smallest valid destination node ID
-    last_dst_id   : int   largest valid destination node ID
-    num_neg       : int   number of negatives per positive edge (default 100)
+    num_neg       : int   max negatives per positive edge (last-K, default 999)
     seed          : int   random seed for reproducibility (default 42)
     """
 
     def __init__(
         self,
         dataset_name: str,
-        first_dst_id: int,
-        last_dst_id: int,
-        num_neg: int = 100,
+        num_neg: int = 999,
         seed: int = 42,
     ):
         self.dataset_name = dataset_name
-        self.first_dst_id = first_dst_id
-        self.last_dst_id  = last_dst_id
         self.num_neg      = num_neg
         np.random.seed(seed)
-        # All valid destination node IDs (used for random fallback sampling)
-        self._all_dst = np.arange(first_dst_id, last_dst_id + 1)
 
     def generate(
         self,
@@ -82,10 +74,14 @@ class RecencyNegativeGenerator:
         eval_data: TemporalData,
         split_mode: str,
         save_dir: str,
-        window: float = None,
     ) -> str:
         """
         Generate recency negatives for eval_data and save to disk.
+
+        For each positive edge (u, v, t), collects the last num_neg unique
+        destinations u visited before t (reverse-chronological order, no
+        random fill). Edges where u has fewer than num_neg historical visits
+        simply get fewer negatives.
 
         Parameters
         ----------
@@ -93,8 +89,6 @@ class RecencyNegativeGenerator:
         eval_data       : TemporalData  — val or test edges to generate negatives for
         split_mode      : 'val' or 'test'
         save_dir        : str  — directory to save the .pkl file
-        window          : float or None  — recency window in timestamp units.
-                          None = adaptive per-source median inter-event time.
 
         Returns
         -------
@@ -103,21 +97,17 @@ class RecencyNegativeGenerator:
         assert split_mode in ("val", "test"), "split_mode must be 'val' or 'test'"
         os.makedirs(save_dir, exist_ok=True)
 
-        # Build a descriptive filename so different configs don't collide
-        window_tag = "adaptive" if window is None else str(int(window))
+        # Filename encodes strategy + K so different configs don't collide
         filename = os.path.join(
             save_dir,
-            f"{self.dataset_name}_{split_mode}_recency_{window_tag}_ns.pkl",
+            f"{self.dataset_name}_{split_mode}_recency_last{self.num_neg}_ns.pkl",
         )
 
         if os.path.exists(filename):
             print(f"[RecencyNegGen] Reusing cached negatives: {filename}")
             return filename
 
-        print(
-            f"[RecencyNegGen] Generating recency negatives "
-            f"({split_mode}, window={window_tag})..."
-        )
+        print(f"[RecencyNegGen] Generating recency negatives ({split_mode}, last-{self.num_neg})...")
 
         # ── Step 1: Build per-source sorted history from training data ────────
         # src_history[u] = list of (t, dst) tuples, sorted by t ascending
@@ -131,19 +121,7 @@ class RecencyNegativeGenerator:
         for s in src_history:
             src_history[s].sort(key=lambda x: x[0])  # sort by timestamp
 
-        # ── Step 2: Compute adaptive window per source (if window=None) ───────
-        src_adaptive_window = {}
-        if window is None:
-            for s, events in src_history.items():
-                if len(events) < 2:
-                    # Only one interaction: use infinite window (take all history)
-                    src_adaptive_window[s] = float("inf")
-                else:
-                    ts = np.array([e[0] for e in events])
-                    # Median gap between consecutive events for this source
-                    src_adaptive_window[s] = float(np.median(np.diff(ts)))
-
-        # ── Step 3: Build conflict dict (avoid sampling other true positives) ─
+        # ── Step 2: Build conflict dict (avoid sampling other true positives) ─
         # At time t, source u may have multiple positive destinations.
         # We exclude all of them from the negative pool.
         eval_src = eval_data.src.cpu().numpy()
@@ -155,7 +133,11 @@ class RecencyNegativeGenerator:
             key = (int(t), int(s))
             conflict.setdefault(key, set()).add(int(d))
 
-        # ── Step 4: For each eval edge, sample recency negatives ──────────────
+        # ── Step 3: For each eval edge, collect last-K recency negatives ────────
+        # Walk backwards through the source's history and collect the most
+        # recent unique destinations before pos_t, up to num_neg.
+        # No random fill — edges with fewer than num_neg historical visits
+        # simply get fewer negatives (matched in Standard MRR as well).
         evaluation_set = {}
 
         for pos_s, pos_d, pos_t in tqdm(
@@ -167,38 +149,20 @@ class RecencyNegativeGenerator:
             # Destinations to exclude (the true positives at this timestamp)
             forbidden = conflict.get((int(pos_t), pos_s), set())
 
-            # Determine window for this source
-            w = src_adaptive_window.get(pos_s, float("inf")) if window is None else window
-
-            # Walk backwards through this source's history to find recency neighbors
-            recency_dsts = set()
+            # Walk backwards: collect most-recent unique dsts before pos_t
+            recency_dsts = []
+            seen = set()
             if pos_s in src_history:
                 for t_h, d_h in reversed(src_history[pos_s]):
                     if t_h >= pos_t:
                         continue        # skip edges at or after pos_t
-                    if t_h < pos_t - w:
-                        break           # outside the recency window, stop early
-                    if d_h not in forbidden:
-                        recency_dsts.add(d_h)
+                    if d_h not in forbidden and d_h not in seen:
+                        recency_dsts.append(d_h)
+                        seen.add(d_h)
+                    if len(recency_dsts) >= self.num_neg:
+                        break           # collected enough
 
-            recency_arr = np.array(list(recency_dsts))
-
-            # Sample up to num_neg from the recency pool
-            if len(recency_arr) >= self.num_neg:
-                neg_dst_arr = np.random.choice(recency_arr, self.num_neg, replace=False)
-            else:
-                # Fill the remainder with random destinations (same fallback as TGB)
-                n_random = self.num_neg - len(recency_arr)
-                invalid  = forbidden | recency_dsts
-                rnd_pool = np.setdiff1d(self._all_dst, np.array(list(invalid)))
-                neg_rnd  = np.random.choice(
-                    rnd_pool,
-                    min(n_random, len(rnd_pool)),
-                    replace=False,
-                )
-                neg_dst_arr = np.concatenate([recency_arr, neg_rnd])
-
-            evaluation_set[(pos_s, pos_d, int(pos_t))] = neg_dst_arr
+            evaluation_set[(pos_s, pos_d, int(pos_t))] = np.array(recency_dsts)
 
         save_pkl(evaluation_set, filename)
         print(f"[RecencyNegGen] Saved to {filename}")

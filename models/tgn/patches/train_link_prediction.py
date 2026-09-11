@@ -58,13 +58,13 @@ import wandb
 LOG_EVERY_N_BATCHES = 200
 
 # Validation DataLoader batch size for large datasets (edges per batch × 999 negatives)
-VAL_BATCH_SIZE = 10
+VAL_BATCH_SIZE = 2
 
 # Only validate every N epochs (saves time; early stopping still works)
 VAL_EVERY_N_EPOCHS = 5
 
 # Use this fraction of val edges for early stopping (1.0 = full val set)
-VAL_SUBSET = 0.1
+VAL_SUBSET = 0.02
 
 
 def _resume_ckpt_path(saved_models_dir: str, prefix: str, epoch: int) -> str:
@@ -334,13 +334,17 @@ if __name__ == "__main__":
         resume_memory_backup = None
         if resume_path:
             print(f"\nResuming from checkpoint: {os.path.basename(resume_path)}", flush=True)
-            resume_memory_backup = _load_resume_checkpoint(
-                resume_path, model, optimizer, early_stopping,
-                args.model_name, args.device)
-            start_epoch = resume_epoch + 1
-            print(f"  Resuming from epoch {start_epoch + 1}/{args.num_epochs} | "
-                  f"best_epoch={early_stopping.best_epoch} | "
-                  f"patience_counter={early_stopping.counter}/{args.patience}", flush=True)
+            try:
+                resume_memory_backup = _load_resume_checkpoint(
+                    resume_path, model, optimizer, early_stopping,
+                    args.model_name, args.device)
+                start_epoch = resume_epoch + 1
+                print(f"  Resuming from epoch {start_epoch + 1}/{args.num_epochs} | "
+                      f"best_epoch={early_stopping.best_epoch} | "
+                      f"patience_counter={early_stopping.counter}/{args.patience}", flush=True)
+            except RuntimeError as e:
+                print(f"  WARNING: Resume checkpoint incompatible ({e}). Starting from epoch 1.", flush=True)
+                resume_memory_backup = None
         else:
             print(f"\nNo resume checkpoint found — starting from epoch 1.", flush=True)
 
@@ -353,13 +357,11 @@ if __name__ == "__main__":
             if args.model_name in ['DyRep', 'TGAT', 'TGN', 'TPNet', 'CAWN', 'TCL', 'GraphMixer', 'DyGFormer', 'PINT']:
                 model[0].set_neighbor_sampler(train_neighbor_sampler)
             if args.model_name in ['JODIE', 'DyRep', 'TGN', 'PINT']:
-                if resume_memory_backup is not None:
-                    # Restore memory state from resume checkpoint (first resumed epoch only)
-                    model[0].memory_bank.reload_memory_bank(resume_memory_backup)
-                    resume_memory_backup = None
-                    print(f"  [ckpt] Memory bank restored from checkpoint.", flush=True)
-                else:
-                    model[0].memory_bank.__init_memory_bank__()
+                # Always reset memory bank at epoch start — each epoch replays from the
+                # beginning of the dataset, so restoring end-of-previous-epoch timestamps
+                # would cause "update memory to time in the past" assertion failures.
+                model[0].memory_bank.__init_memory_bank__()
+                resume_memory_backup = None  # discard saved state; reset is correct here
             if args.model_name == 'NAT':
                 model[0].init_ncache()
             if args.use_random_projection:

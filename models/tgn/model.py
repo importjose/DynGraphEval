@@ -13,8 +13,10 @@ Checkpoint format:
   The file is a .pkl saved with torch.save(model.state_dict(), path).
 """
 
+import time
 import numpy as np
 import torch
+from tqdm import tqdm
 from torch_geometric.data import TemporalData
 from torch_geometric.loader import TemporalDataLoader
 
@@ -143,8 +145,11 @@ class TPNetTGN(BaseModel):
         path = path or self.ckpt_path
         ckpt = torch.load(path, map_location=self.device)
 
-        backbone_sd = {k[2:]: v for k, v in ckpt.items() if k.startswith('0.')}
-        lp_sd       = {k[2:]: v for k, v in ckpt.items() if k.startswith('1.')}
+        # TPNet saves {'model': state_dict, 'args': ..., 'message': ...}
+        state_dict = ckpt['model'] if isinstance(ckpt, dict) and 'model' in ckpt else ckpt
+
+        backbone_sd = {k[2:]: v for k, v in state_dict.items() if k.startswith('0.')}
+        lp_sd       = {k[2:]: v for k, v in state_dict.items() if k.startswith('1.')}
 
         self.backbone.load_state_dict(backbone_sd)
         self.link_predictor.load_state_dict(lp_sd)
@@ -176,11 +181,14 @@ class TPNetTGN(BaseModel):
         self.backbone.memory_bank.__init_memory_bank__()
 
         with torch.no_grad():
-            for tdata, eids in [(self.train_data, self._train_eids),
-                                 (self.val_data,   self._val_eids)]:
+            for split_name, tdata, eids in [("train", self.train_data, self._train_eids),
+                                             ("val",   self.val_data,   self._val_eids)]:
                 srcs, dsts, times, edge_ids = self._to_numpy(tdata, eids)
                 n = len(srcs)
-                for start in range(0, n, self.batch_size):
+                n_batches = (n + self.batch_size - 1) // self.batch_size
+                pbar = tqdm(range(0, n, self.batch_size), total=n_batches,
+                            desc=f"  warmup/{split_name}", ncols=100, unit="batch")
+                for start in pbar:
                     end = min(start + self.batch_size, n)
                     self.backbone.compute_src_dst_node_temporal_embeddings(
                         src_node_ids       = srcs[start:end],
@@ -213,9 +221,13 @@ class TPNetTGN(BaseModel):
         srcs, dsts, times, edge_ids = self._to_numpy(eval_data, self._test_eids)
         n         = len(srcs)
         perf_list = []
+        n_batches = (n + self.batch_size - 1) // self.batch_size
+        t0        = time.time()
 
+        pbar = tqdm(range(0, n, self.batch_size), total=n_batches,
+                    desc="  scoring", ncols=100, unit="batch")
         # We iterate in batches but score per-edge (TGB has per-edge neg lists)
-        for start in range(0, n, self.batch_size):
+        for start in pbar:
             end = min(start + self.batch_size, n)
 
             batch_src   = srcs[start:end]
@@ -264,6 +276,9 @@ class TPNetTGN(BaseModel):
                     "eval_metric": ["mrr"],
                 }
                 perf_list.append(evaluator.eval(input_dict)["mrr"])
+
+            running_mrr = float(np.mean(perf_list)) if perf_list else 0.0
+            pbar.set_postfix(mrr=f"{running_mrr:.4f}", elapsed=f"{time.time()-t0:.0f}s")
 
             # ── Update memory with positive batch ──────────────────────────────
             self.backbone.compute_src_dst_node_temporal_embeddings(

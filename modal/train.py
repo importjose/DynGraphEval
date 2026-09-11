@@ -1,8 +1,9 @@
 """
-Modal training app for TGN on tgbl-wiki.
+Modal training app for DynGraphEval models.
 
 Run from the DynGraphEval root directory:
-    modal run modal/train.py
+    modal run modal/train.py                          # TGN (default)
+    modal run modal/train.py --model graphmixer
     modal run modal/train.py --dataset tgbl-wiki --epochs 50 --patience 5
 
 Persistence:
@@ -22,7 +23,9 @@ import time
 
 import modal
 
-# ── Image: all Python dependencies ───────────────────────────────────────────
+# ── Image: dependencies + local repo code ────────────────────────────────────
+# add_local_dir() copies the repo into the image at build time.
+# Modal rebuilds only when file contents change (layer-cached otherwise).
 image = (
     modal.Image.debian_slim(python_version="3.11")
     .apt_install("git")
@@ -35,24 +38,20 @@ image = (
         "pandas>=2.0",
         "tqdm>=4.65",
         "pyyaml>=6.0",
+        # TPNet repo dependencies
+        "numba",
+        "wandb",
+        "scikit-learn",
+        "scipy",
     )
+    .add_local_dir(".", remote_path="/repo", copy=True)
 )
 
 # ── Persistent volume ─────────────────────────────────────────────────────────
-volume     = modal.Volume.from_name("dyngrapheval-data", create_if_missing=True)
+volume          = modal.Volume.from_name("dyngrapheval-data", create_if_missing=True)
 VOLUME_PATH     = "/data"
 DATASETS_DIR    = f"{VOLUME_PATH}/datasets"
 CHECKPOINTS_DIR = f"{VOLUME_PATH}/checkpoints"
-
-# ── Repo mount: copies local DynGraphEval code into the container ─────────────
-# Run `modal run modal/train.py` from the DynGraphEval root directory.
-repo_mount = modal.Mount.from_local_dir(
-    local_path=".",
-    remote_path="/repo",
-    condition=lambda p: not any(
-        p.startswith(seg) for seg in [".git/", "__pycache__/", "checkpoints/", "datasets/", "neg_cache/"]
-    ),
-)
 
 app = modal.App("dyngrapheval-train")
 
@@ -62,7 +61,6 @@ app = modal.App("dyngrapheval-train")
     gpu="A10",
     timeout=86400,      # 24-hour hard limit
     volumes={VOLUME_PATH: volume},
-    mounts=[repo_mount],
 )
 class TrainJob:
     """
@@ -98,6 +96,7 @@ class TrainJob:
     @modal.method()
     def run(
         self,
+        model:         str   = "tgn",
         dataset:       str   = "tgbl-wiki",
         epochs:        int   = 50,
         patience:      int   = 5,
@@ -112,23 +111,24 @@ class TrainJob:
         lr:            float = 0.0001,
     ):
         """
-        Launch training via models/tgn/train.py.
+        Launch training via models/{model}/train.py.
 
         - Datasets are cached in the Modal Volume; subsequent runs skip download.
         - Resume checkpoints are written to the volume after every epoch.
         - The best checkpoint (by val MRR) is also copied to the volume.
         """
-        self._log(f"Training TGN on {dataset} | epochs={epochs} patience={patience} seed={seed}")
+        train_script = f"/repo/models/{model}/train.py"
+        self._log(f"Training {model.upper()} on {dataset} | "
+                  f"epochs={epochs} patience={patience} seed={seed}")
 
         cmd = [
-            sys.executable, "-u", "/repo/models/tgn/train.py",
+            sys.executable, "-u", train_script,
             "--dataset",       dataset,
             "--epochs",        str(epochs),
             "--patience",      str(patience),
             "--batch_size",    str(batch_size),
             "--seed",          str(seed),
             "--num_layers",    str(num_layers),
-            "--num_heads",     str(num_heads),
             "--output_dim",    str(output_dim),
             "--time_feat_dim", str(time_feat_dim),
             "--num_neighbors", str(num_neighbors),
@@ -136,8 +136,11 @@ class TrainJob:
             "--lr",            str(lr),
             "--repo_dir",        "/tmp/TGB_TPNet",
             "--datasets_cache",  DATASETS_DIR,
-            "--checkpoints_dir", CHECKPOINTS_DIR,
+            "--checkpoints_dir", os.path.join(CHECKPOINTS_DIR, model),
         ]
+        # TGN and TGAT use num_heads; GraphMixer does not
+        if model in ("tgn", "tgat"):
+            cmd += ["--num_heads", str(num_heads)]
         env = os.environ.copy()
         env["PYTHONUNBUFFERED"] = "1"
 
@@ -167,6 +170,7 @@ class TrainJob:
 
 @app.local_entrypoint()
 def main(
+    model:      str = "tgn",
     dataset:    str = "tgbl-wiki",
     epochs:     int = 50,
     patience:   int = 5,
@@ -178,10 +182,12 @@ def main(
 
     Examples:
         modal run modal/train.py
+        modal run modal/train.py --model graphmixer
         modal run modal/train.py --dataset tgbl-wiki --epochs 100 --seed 1
     """
     job = TrainJob()
     job.run.remote(
+        model=model,
         dataset=dataset,
         epochs=epochs,
         patience=patience,

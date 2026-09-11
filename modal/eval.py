@@ -66,7 +66,7 @@ def evaluate(
 
     Parameters
     ----------
-    model      : 'tgn', 'graphmixer', 'fl_tgn', or 'fedlink'
+    model      : 'edgebank', 'tgn', 'graphmixer', 'tgat', 'fl_tgn', or 'fedlink'
     checkpoint : path to checkpoint on the volume.
                  Defaults to /data/checkpoints/{model}/{dataset}/run0.pkl
     dataset    : TGB dataset name (default 'tgbl-wiki')
@@ -98,8 +98,8 @@ def evaluate(
     num_nodes = int(max(data.src.max(), data.dst.max())) + 1
     device    = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    # ── Default checkpoint path ───────────────────────────────────────────────
-    if checkpoint is None:
+    # ── Default checkpoint path (not used by edgebank) ───────────────────────
+    if checkpoint is None and model != "edgebank":
         checkpoint = os.path.join(CHECKPOINTS_DIR, model, dataset, "run0.pkl")
 
     # ── Instantiate and load model ────────────────────────────────────────────
@@ -109,8 +109,14 @@ def evaluate(
     from models.tpnet.model import TPNetModel
     from models.fl_tgn.model import FederatedTGN
     from models.fedlink.model import FedLink
+    from models.edgebank.model import EdgeBankModel
 
-    if model == "tgn":
+    if model == "edgebank":
+        # No checkpoint needed — warmup() builds memory from train+val
+        m = EdgeBankModel()
+        m.load_checkpoint()
+
+    elif model == "tgn":
         m = TPNetTGN(
             checkpoint_path=checkpoint,
             num_nodes=num_nodes,
@@ -189,7 +195,7 @@ def evaluate(
         m.load_checkpoint()
 
     else:
-        raise ValueError(f"Unknown model '{model}'. Choose from: tgn, tgat, graphmixer, tpnet, fl_tgn, fedlink")
+        raise ValueError(f"Unknown model '{model}'. Choose from: edgebank, tgn, tgat, graphmixer, tpnet, fl_tgn, fedlink")
 
     # ── Run evaluation ────────────────────────────────────────────────────────
     from evaluate.evaluator import Evaluator

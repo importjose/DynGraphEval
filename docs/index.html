@@ -146,8 +146,10 @@
       <li><a href="#return-explore" style="padding-left:0.8rem">4.2 Return vs Explore</a></li>
       <li><a href="#k-curve" style="padding-left:0.8rem">4.3 K-curve</a></li>
       <li><a href="#models">5. Models</a></li>
+      <li><a href="#edgebank" style="padding-left:0.8rem">5.1 EdgeBank Baseline</a></li>
       <li><a href="#results">6. Results</a></li>
       <li><a href="#interpretation">7. Interpretation</a></li>
+      <li><a href="#mem-floor" style="padding-left:0.8rem">7.1 Memorization Floor</a></li>
     </ul>
   </nav>
 </div>
@@ -157,7 +159,7 @@
 
 <h1>DynGraphEval</h1>
 <p class="subtitle">A framework for evaluating what temporal graph models actually learn</p>
-<p class="authors">tgbl-wiki benchmark &nbsp;·&nbsp; TGN, TGAT, GraphMixer</p>
+<p class="authors">tgbl-wiki benchmark &nbsp;·&nbsp; TGN, TGAT, GraphMixer, EdgeBank</p>
 
 <hr>
 
@@ -241,6 +243,7 @@ $$\text{MRR} = \frac{1}{|E_\text{test}|} \sum_{(u,v,t)\,\in\, E_\text{test}} \fr
     <tr><td>TGN (memory bank + trainable encoder)</td><td><strong>0.601</strong></td><td>0.789</td></tr>
     <tr><td>TGAT (no memory, trainable encoder)</td><td>0.568</td><td>0.773</td></tr>
     <tr><td>GraphMixer (no memory, fixed encoder)</td><td>0.549</td><td><strong>0.821</strong></td></tr>
+    <tr style="color:#666"><td>EdgeBank (memorization baseline)</td><td>0.495</td><td>0.362</td></tr>
   </tbody>
 </table>
 
@@ -251,6 +254,34 @@ $$\text{MRR} = \frac{1}{|E_\text{test}|} \sum_{(u,v,t)\,\in\, E_\text{test}} \fr
 
 <div class="chart-wrap">
   <canvas id="chartInversion"></canvas>
+</div>
+
+<h3>The memorization floor</h3>
+
+<p>
+  EdgeBank is a non-parametric baseline that scores a candidate link 1 if the
+  <em>(source, destination)</em> pair has been seen before, and 0 otherwise — no parameters,
+  no training, no temporal reasoning. Under Standard MRR it scores <strong>0.495</strong>,
+  only 0.106 below TGN. A large fraction of Standard MRR is achievable by memorization alone.
+</p>
+
+<p>
+  Under Recency MRR, EdgeBank scores <strong>0.362</strong> — well below every neural model.
+  The recency negatives are all edges the source recently visited, meaning they are all in
+  EdgeBank's memory too. Both the positive and every negative score 1, creating a complete tie
+  that the tie-handling formula resolves to near-random rank. EdgeBank cannot distinguish
+  <em>what was visited recently</em> from <em>what will be visited next</em>.
+</p>
+
+<p>
+  The chart below shows how large a model's advantage over EdgeBank is on each metric.
+  The Recency MRR gap is 4–8× larger than the Standard MRR gap for every model —
+  Recency MRR amplifies differences in temporal reasoning while Standard MRR partially
+  masks them behind memorization.
+</p>
+
+<div class="chart-wrap">
+  <canvas id="chartMemFloor"></canvas>
 </div>
 
 <hr>
@@ -440,15 +471,39 @@ $$\text{Explore}(u,v) = \mathbf{1}\!\left[(u,v) \notin E_\text{train} \cup E_\te
       <td>Fixed (non-trainable)</td>
       <td>MLP-Mixer over the most recent K neighbors. Time encoded via a fixed non-trainable function. No persistent state.</td>
     </tr>
+    <tr style="color:#666">
+      <td>EdgeBank</td>
+      <td>Seen-pair set</td>
+      <td>None</td>
+      <td>Non-parametric baseline. Scores 1 if (src, dst) has been seen before, 0 otherwise. No learning, no temporal reasoning.</td>
+    </tr>
   </tbody>
 </table>
 
 <p>
-  The three architectures span a space of design choices. TGN has both a persistent memory
+  The three neural architectures span a space of design choices. TGN has both a persistent memory
   bank and a trainable time encoder. TGAT has a trainable encoder but no memory.
   GraphMixer has neither — it treats neighbors uniformly using a fixed encoding.
   This progression lets us isolate which architectural component drives the
   results we observe.
+</p>
+
+<h3 id="edgebank">5.1 EdgeBank as a baseline</h3>
+
+<p>
+  EdgeBank is included as a <strong>memorization floor</strong>. It has no parameters and no
+  temporal reasoning — it simply remembers which (source, destination) pairs have occurred
+  and scores 1 for seen pairs, 0 for unseen ones. Its memory is initialized from train+val
+  and updated rolling during test evaluation (EdgeBank∞ variant).
+</p>
+
+<p>
+  EdgeBank's scores under Recency MRR are not near zero, despite being unable to distinguish
+  the positive from the negatives, because tie-handling depends on pool size. When a source
+  has only a small training history, the tie pool is small and the resulting MRR is moderate
+  (e.g. 5 negatives all tied → rank ≈ 3.5, MRR ≈ 0.29). The 0.362 overall Recency MRR
+  reflects this distribution over sparse histories — it is the best a memorizaton-only
+  model can do.
 </p>
 
 <hr>
@@ -465,6 +520,7 @@ $$\text{Explore}(u,v) = \mathbf{1}\!\left[(u,v) \notin E_\text{train} \cup E_\te
     <tr><td>TGN</td><td>0.821</td><td>0.708</td><td><strong>0.113</strong></td><td>10,380</td><td>4,089</td></tr>
     <tr><td>TGAT</td><td>0.797</td><td>0.711</td><td>0.086</td><td>10,380</td><td>4,089</td></tr>
     <tr><td>GraphMixer</td><td><strong>0.834</strong></td><td><strong>0.787</strong></td><td>0.047</td><td>10,380</td><td>4,089</td></tr>
+    <tr style="color:#666"><td>EdgeBank</td><td>0.392</td><td>0.284</td><td>0.108</td><td>10,380</td><td>4,089</td></tr>
   </tbody>
 </table>
 
@@ -482,6 +538,7 @@ $$\text{Explore}(u,v) = \mathbf{1}\!\left[(u,v) \notin E_\text{train} \cup E_\te
     <tr><td>TGN</td><td>0.802</td><td>0.794</td><td>0.791</td><td>0.790</td><td>0.789</td><td>0.789</td><td>−0.013</td></tr>
     <tr><td>TGAT</td><td>0.785</td><td>0.778</td><td>0.774</td><td>0.773</td><td>0.773</td><td>0.773</td><td>−0.012</td></tr>
     <tr><td>GraphMixer</td><td><strong>0.835</strong></td><td><strong>0.828</strong></td><td><strong>0.824</strong></td><td><strong>0.822</strong></td><td><strong>0.821</strong></td><td><strong>0.821</strong></td><td>−0.014</td></tr>
+    <tr style="color:#666"><td>EdgeBank</td><td>0.372</td><td>0.364</td><td>0.363</td><td>0.362</td><td>0.362</td><td>0.362</td><td>−0.010</td></tr>
   </tbody>
 </table>
 
@@ -495,6 +552,7 @@ $$\text{Explore}(u,v) = \mathbf{1}\!\left[(u,v) \notin E_\text{train} \cup E_\te
     <tr><td>TGN</td><td>0.832</td><td>0.825</td><td>0.822</td><td>0.822</td><td>0.821</td></tr>
     <tr><td>TGAT</td><td>0.807</td><td>0.801</td><td>0.798</td><td>0.798</td><td>0.797</td></tr>
     <tr><td>GraphMixer</td><td><strong>0.845</strong></td><td><strong>0.839</strong></td><td><strong>0.836</strong></td><td><strong>0.835</strong></td><td><strong>0.834</strong></td></tr>
+    <tr style="color:#666"><td>EdgeBank</td><td>0.403</td><td>0.395</td><td>0.393</td><td>0.393</td><td>0.392</td></tr>
   </tbody>
 </table>
 
@@ -508,6 +566,7 @@ $$\text{Explore}(u,v) = \mathbf{1}\!\left[(u,v) \notin E_\text{train} \cup E_\te
     <tr><td>TGN</td><td>0.728</td><td>0.716</td><td>0.710</td><td>0.709</td><td>0.708</td></tr>
     <tr><td>TGAT</td><td>0.728</td><td>0.718</td><td>0.713</td><td>0.712</td><td>0.711</td></tr>
     <tr><td>GraphMixer</td><td><strong>0.810</strong></td><td><strong>0.799</strong></td><td><strong>0.791</strong></td><td><strong>0.789</strong></td><td><strong>0.787</strong></td></tr>
+    <tr style="color:#666"><td>EdgeBank</td><td>0.295</td><td>0.287</td><td>0.285</td><td>0.285</td><td>0.284</td></tr>
   </tbody>
 </table>
 
@@ -587,6 +646,43 @@ $$\text{Explore}(u,v) = \mathbf{1}\!\left[(u,v) \notin E_\text{train} \cup E_\te
   measure of what federation costs in temporal memory.
 </p>
 
+<h3 id="mem-floor">7.1 Recency MRR versus memorization</h3>
+
+<p>
+  EdgeBank establishes the memorization floor for both metrics. On Standard MRR, the floor
+  is 0.495 — barely below every neural model. On Recency MRR, the floor is 0.362 — well
+  below every neural model. The gap between neural models and EdgeBank is 4–8× wider on
+  Recency MRR than on Standard MRR.
+</p>
+
+<table>
+  <thead>
+    <tr><th>Model</th><th>Advantage over EdgeBank (Standard)</th><th>Advantage over EdgeBank (Recency)</th><th>Ratio</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>TGN</td><td>+0.106</td><td>+0.427</td><td>4.0×</td></tr>
+    <tr><td>TGAT</td><td>+0.073</td><td>+0.411</td><td>5.6×</td></tr>
+    <tr><td>GraphMixer</td><td>+0.054</td><td>+0.459</td><td>8.5×</td></tr>
+  </tbody>
+</table>
+
+<p>
+  GraphMixer shows the largest Recency advantage (8.5×) because its fixed encoder is not
+  confused by the recency negatives, while its Standard MRR advantage is the smallest because
+  its lack of temporal bias does not help with Standard's random negatives. TGN shows the
+  smallest Recency advantage ratio (4×) because its trainable encoder inflates recency
+  negative scores, cutting into its Recency MRR.
+</p>
+
+<p>
+  The EdgeBank Explore MRR (0.284) deserves special attention. On Explore edges, the positive
+  destination has never been seen — so EdgeBank scores it 0.0 — while every recency negative
+  has been seen — so EdgeBank scores them 1.0. The positive always loses. This is a hard floor:
+  even neural models that genuinely generalize to novel edges are still well above this floor
+  (TGN 0.708, GraphMixer 0.787), confirming those Explore gains represent real structural
+  generalization, not memorization artifacts.
+</p>
+
 <hr>
 
 <p style="color: #888; font-size: 0.85rem;">
@@ -599,11 +695,14 @@ $$\text{Explore}(u,v) = \mathbf{1}\!\left[(u,v) \notin E_\text{train} \cup E_\te
 <script>
   // ── Chart.js visualizations ──────────────────────────────────────────────
 
+  const MODELS_4 = ['TGN', 'TGAT', 'GraphMixer', 'EdgeBank'];
   const MODELS   = ['TGN', 'TGAT', 'GraphMixer'];
   const C_TGN    = 'rgba(59, 130, 246, 0.8)';   // blue
   const C_TGAT   = 'rgba(234, 88, 12, 0.8)';    // orange
   const C_GM     = 'rgba(22, 163, 74, 0.8)';    // green
-  const MODEL_COLORS = [C_TGN, C_TGAT, C_GM];
+  const C_EB     = 'rgba(107, 114, 128, 0.8)';  // gray (EdgeBank)
+  const MODEL_COLORS   = [C_TGN, C_TGAT, C_GM];
+  const MODEL_COLORS_4 = [C_TGN, C_TGAT, C_GM, C_EB];
 
   const baseOpts = {
     responsive: true,
@@ -615,55 +714,54 @@ $$\text{Explore}(u,v) = \mathbf{1}\!\left[(u,v) \notin E_\text{train} \cup E_\te
     }
   };
 
-  // 1. Standard vs Recency MRR inversion
+  // 1. Standard vs Recency MRR inversion (including EdgeBank)
   new Chart(document.getElementById('chartInversion'), {
     type: 'bar',
     data: {
-      labels: MODELS,
+      labels: MODELS_4,
       datasets: [
         {
           label: 'Standard MRR',
-          data: [0.601, 0.568, 0.549],
-          backgroundColor: MODEL_COLORS,
-          borderColor: MODEL_COLORS.map(c => c.replace('0.8', '1')),
+          data: [0.601, 0.568, 0.549, 0.495],
+          backgroundColor: MODEL_COLORS_4,
+          borderColor: MODEL_COLORS_4.map(c => c.replace('0.8', '1')),
           borderWidth: 1
         },
         {
           label: 'Recency MRR',
-          data: [0.789, 0.773, 0.821],
-          backgroundColor: MODEL_COLORS.map(c => c.replace('0.8', '0.35')),
-          borderColor: MODEL_COLORS.map(c => c.replace('0.8', '1')),
-          borderWidth: 1,
-          borderDash: [4, 3]
+          data: [0.789, 0.773, 0.821, 0.362],
+          backgroundColor: MODEL_COLORS_4.map(c => c.replace('0.8', '0.35')),
+          borderColor: MODEL_COLORS_4.map(c => c.replace('0.8', '1')),
+          borderWidth: 1
         }
       ]
     },
     options: {
       ...baseOpts,
-      scales: { ...baseOpts.scales, y: { min: 0.45, grid: { color: '#eee' } } },
+      scales: { ...baseOpts.scales, y: { min: 0.3, grid: { color: '#eee' } } },
       plugins: {
         ...baseOpts.plugins,
-        title: { display: true, text: 'Standard MRR vs Recency MRR', color: '#333', font: { size: 13, family: 'Georgia' } }
+        title: { display: true, text: 'Standard MRR vs Recency MRR (EdgeBank = memorization floor)', color: '#333', font: { size: 13, family: 'Georgia' } }
       }
     }
   });
 
-  // 2. Return vs Explore grouped bar
-  new Chart(document.getElementById('chartReturnExplore'), {
+  // 2. Memorization floor: gap above EdgeBank on each metric
+  new Chart(document.getElementById('chartMemFloor'), {
     type: 'bar',
     data: {
       labels: MODELS,
       datasets: [
         {
-          label: 'Return MRR',
-          data: [0.821, 0.797, 0.834],
+          label: 'Advantage over EdgeBank — Standard MRR',
+          data: [0.106, 0.073, 0.054],
           backgroundColor: MODEL_COLORS,
           borderColor: MODEL_COLORS.map(c => c.replace('0.8', '1')),
           borderWidth: 1
         },
         {
-          label: 'Explore MRR',
-          data: [0.708, 0.711, 0.787],
+          label: 'Advantage over EdgeBank — Recency MRR',
+          data: [0.427, 0.411, 0.459],
           backgroundColor: MODEL_COLORS.map(c => c.replace('0.8', '0.35')),
           borderColor: MODEL_COLORS.map(c => c.replace('0.8', '1')),
           borderWidth: 1
@@ -671,7 +769,44 @@ $$\text{Explore}(u,v) = \mathbf{1}\!\left[(u,v) \notin E_\text{train} \cup E_\te
       ]
     },
     options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { position: 'bottom' },
+        title: { display: true, text: 'How far above pure memorization (EdgeBank) each model sits', color: '#333', font: { size: 13, family: 'Georgia' } }
+      },
+      scales: {
+        y: { min: 0, max: 0.55, grid: { color: '#eee' }, ticks: { callback: v => '+' + v.toFixed(3) } },
+        x: { grid: { display: false } }
+      }
+    }
+  });
+
+  // 3. Return vs Explore grouped bar (including EdgeBank)
+  new Chart(document.getElementById('chartReturnExplore'), {
+    type: 'bar',
+    data: {
+      labels: MODELS_4,
+      datasets: [
+        {
+          label: 'Return MRR',
+          data: [0.821, 0.797, 0.834, 0.392],
+          backgroundColor: MODEL_COLORS_4,
+          borderColor: MODEL_COLORS_4.map(c => c.replace('0.8', '1')),
+          borderWidth: 1
+        },
+        {
+          label: 'Explore MRR',
+          data: [0.708, 0.711, 0.787, 0.284],
+          backgroundColor: MODEL_COLORS_4.map(c => c.replace('0.8', '0.35')),
+          borderColor: MODEL_COLORS_4.map(c => c.replace('0.8', '1')),
+          borderWidth: 1
+        }
+      ]
+    },
+    options: {
       ...baseOpts,
+      scales: { ...baseOpts.scales, y: { min: 0.2, grid: { color: '#eee' } } },
       plugins: {
         ...baseOpts.plugins,
         title: { display: true, text: 'Return vs Explore MRR (Recency negatives)', color: '#333', font: { size: 13, family: 'Georgia' } }
@@ -679,7 +814,7 @@ $$\text{Explore}(u,v) = \mathbf{1}\!\left[(u,v) \notin E_\text{train} \cup E_\te
     }
   });
 
-  // 3. K-curve line chart (all edges, return, explore)
+  // 4. K-curve line chart (all edges, return, explore) including EdgeBank
   const K_LABELS = ['K=10', 'K=20', 'K=50', 'K=100', 'K=999'];
 
   new Chart(document.getElementById('chartKcurve'), {
@@ -687,18 +822,21 @@ $$\text{Explore}(u,v) = \mathbf{1}\!\left[(u,v) \notin E_\text{train} \cup E_\te
     data: {
       labels: K_LABELS,
       datasets: [
-        // All edges
+        // All edges (solid)
         { label: 'TGN (all)',        data: [0.802, 0.794, 0.791, 0.790, 0.789], borderColor: C_TGN,  backgroundColor: 'transparent', borderWidth: 2, pointRadius: 3 },
         { label: 'TGAT (all)',       data: [0.785, 0.778, 0.774, 0.773, 0.773], borderColor: C_TGAT, backgroundColor: 'transparent', borderWidth: 2, pointRadius: 3 },
         { label: 'GraphMixer (all)', data: [0.835, 0.828, 0.824, 0.822, 0.821], borderColor: C_GM,   backgroundColor: 'transparent', borderWidth: 2, pointRadius: 3 },
+        { label: 'EdgeBank (all)',   data: [0.372, 0.364, 0.363, 0.362, 0.362], borderColor: C_EB,   backgroundColor: 'transparent', borderWidth: 2, pointRadius: 3 },
         // Return edges (dashed)
         { label: 'TGN (return)',        data: [0.832, 0.825, 0.822, 0.822, 0.821], borderColor: C_TGN,  backgroundColor: 'transparent', borderWidth: 1.5, borderDash: [5,3], pointRadius: 2 },
         { label: 'TGAT (return)',       data: [0.807, 0.801, 0.798, 0.798, 0.797], borderColor: C_TGAT, backgroundColor: 'transparent', borderWidth: 1.5, borderDash: [5,3], pointRadius: 2 },
         { label: 'GraphMixer (return)', data: [0.845, 0.839, 0.836, 0.835, 0.834], borderColor: C_GM,   backgroundColor: 'transparent', borderWidth: 1.5, borderDash: [5,3], pointRadius: 2 },
+        { label: 'EdgeBank (return)',   data: [0.403, 0.395, 0.393, 0.393, 0.392], borderColor: C_EB,   backgroundColor: 'transparent', borderWidth: 1.5, borderDash: [5,3], pointRadius: 2 },
         // Explore edges (dotted)
         { label: 'TGN (explore)',        data: [0.728, 0.716, 0.710, 0.709, 0.708], borderColor: C_TGN,  backgroundColor: 'transparent', borderWidth: 1.5, borderDash: [2,3], pointRadius: 2 },
         { label: 'TGAT (explore)',       data: [0.728, 0.718, 0.713, 0.712, 0.711], borderColor: C_TGAT, backgroundColor: 'transparent', borderWidth: 1.5, borderDash: [2,3], pointRadius: 2 },
-        { label: 'GraphMixer (explore)', data: [0.810, 0.799, 0.791, 0.789, 0.787], borderColor: C_GM,   backgroundColor: 'transparent', borderWidth: 1.5, borderDash: [2,3], pointRadius: 2 }
+        { label: 'GraphMixer (explore)', data: [0.810, 0.799, 0.791, 0.789, 0.787], borderColor: C_GM,   backgroundColor: 'transparent', borderWidth: 1.5, borderDash: [2,3], pointRadius: 2 },
+        { label: 'EdgeBank (explore)',   data: [0.295, 0.287, 0.285, 0.285, 0.284], borderColor: C_EB,   backgroundColor: 'transparent', borderWidth: 1.5, borderDash: [2,3], pointRadius: 2 }
       ]
     },
     options: {
@@ -709,7 +847,7 @@ $$\text{Explore}(u,v) = \mathbf{1}\!\left[(u,v) \notin E_\text{train} \cup E_\te
         title: { display: true, text: 'K-curve: Recency MRR vs Negative Pool Depth (solid=all, dashed=return, dotted=explore)', color: '#333', font: { size: 13, family: 'Georgia' } }
       },
       scales: {
-        y: { min: 0.65, max: 0.88, grid: { color: '#eee' } },
+        y: { min: 0.25, max: 0.88, grid: { color: '#eee' } },
         x: { grid: { display: false } }
       }
     }

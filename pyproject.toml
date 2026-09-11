@@ -11,6 +11,8 @@ dependencies = [
     "tqdm>=4.65",
     "pyyaml>=6.0",
     "modal>=0.64",
+    "streamlit>=1.35",
+    "plotly>=5.20",
 ]
 
 [build-system]

@@ -623,8 +623,10 @@ with tab_raw:
     st.caption("One row per JSON file. Use the sidebar to filter by dataset and model.")
 
     display_cols = [
-        "file", "model", "dataset", "standard_mrr", "recency_mrr",
-        "recency_return_mrr", "recency_explore_mrr", "n_scored",
+        "file", "model", "dataset",
+        "standard_mrr", "standard_mrr_return", "standard_mrr_explore",
+        "recency_mrr", "recency_return_mrr", "recency_explore_mrr",
+        "n_scored",
     ]
     st.dataframe(
         df_ds[display_cols].sort_values(["model", "file"]).reset_index(drop=True),

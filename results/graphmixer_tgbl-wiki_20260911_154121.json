@@ -1,9 +1,9 @@
 {
   "model": "graphmixer",
   "dataset": "tgbl-wiki",
-  "standard_mrr": 0.549,
-  "standard_mrr_return": null,
-  "standard_mrr_explore": null,
+  "standard_mrr": 0.5492,
+  "standard_mrr_return": 0.5934,
+  "standard_mrr_explore": 0.4412,
   "recency_mrr": 0.8208,
   "recency_k_curve": {
     "k10": 0.8352,

@@ -2,8 +2,8 @@
   "model": "tgn",
   "dataset": "tgbl-wiki",
   "standard_mrr": 0.601,
-  "standard_mrr_return": null,
-  "standard_mrr_explore": null,
+  "standard_mrr_return": 0.6582,
+  "standard_mrr_explore": 0.4615,
   "recency_mrr": 0.7892,
   "recency_k_curve": {
     "k10": 0.8024,

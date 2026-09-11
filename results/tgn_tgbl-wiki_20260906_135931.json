@@ -1,0 +1,6 @@
+{
+  "model": "tgn",
+  "dataset": "tgbl-wiki",
+  "standard_mrr": 0.917,
+  "recency_mrr": 0.7892
+}

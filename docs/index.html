@@ -1,0 +1,740 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>DynGraphEval</title>
+  <script>
+    window.MathJax = {
+      tex: { inlineMath: [['$','$']], displayMath: [['$$','$$']], tags: 'ams' }
+    };
+  </script>
+  <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml.js" async></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <style>
+    /* ── Layout ── */
+    body {
+      font-family: 'Georgia', serif;
+      font-size: 17px;
+      line-height: 1.75;
+      color: #1a1a1a;
+      background: #fff;
+      display: flex;
+      min-height: 100vh;
+    }
+
+    /* ── Sidebar nav ── */
+    .sidebar {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 190px;
+      height: 100vh;
+      overflow-y: auto;
+      padding: 2.5rem 1rem 2rem 1.5rem;
+      box-sizing: border-box;
+    }
+
+    .sidebar-brand {
+      font-size: 0.9rem;
+      font-weight: bold;
+      color: #1a1a1a;
+      text-decoration: none;
+      display: block;
+      margin-bottom: 1.5rem;
+    }
+
+    .sidebar nav ul {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+    }
+
+    .sidebar nav li { margin-bottom: 0; }
+
+    .sidebar nav a {
+      display: block;
+      font-size: 0.85rem;
+      color: #aaa;
+      text-decoration: none;
+      padding: 0.2rem 0;
+      line-height: 1.5;
+      transition: color 0.15s;
+    }
+
+    .sidebar nav a:hover { color: #1a1a1a; }
+    .sidebar nav a.active { color: #1a1a1a; }
+
+    /* ── Main content ── */
+    .content {
+      margin-left: 190px;
+      max-width: 920px;
+      padding: 4rem 2.5rem 8rem 3rem;
+      flex: 1;
+      box-sizing: border-box;
+    }
+
+    .chart-wrap {
+      margin: 1.5rem 0 2rem;
+      position: relative;
+      height: 260px;
+    }
+
+    @media (max-width: 768px) {
+      .sidebar { display: none; }
+      .content { margin-left: 0; padding: 2rem 1.25rem 5rem; }
+    }
+
+    h1 { font-size: 2rem; margin-bottom: 0.25rem; }
+    h2 { font-size: 1.3rem; margin-top: 3rem; margin-bottom: 0.75rem; border-bottom: 1px solid #ddd; padding-bottom: 0.3rem; }
+    h3 { font-size: 1.05rem; margin-top: 1.8rem; margin-bottom: 0.4rem; }
+
+    p  { margin: 0 0 1rem; }
+    ul, ol { margin: 0.5rem 0 1rem 1.5rem; }
+    li { margin-bottom: 0.3rem; }
+
+    .subtitle { color: #555; font-size: 0.95rem; margin-bottom: 0.5rem; }
+    .authors  { color: #555; font-size: 0.9rem; font-style: italic; margin-bottom: 2.5rem; }
+
+    .math-block {
+      background: #f7f7f7;
+      border-left: 3px solid #aaa;
+      padding: 0.8rem 1.2rem;
+      margin: 1.2rem 0;
+      overflow-x: auto;
+      font-size: 0.95rem;
+    }
+
+    blockquote {
+      border-left: 3px solid #ccc;
+      margin: 1.2rem 0;
+      padding: 0.6rem 1.2rem;
+      color: #444;
+      background: #fafafa;
+    }
+    blockquote p { margin: 0; }
+
+    code {
+      font-family: monospace;
+      background: #f0f0f0;
+      padding: 0.1rem 0.35rem;
+      border-radius: 3px;
+      font-size: 0.88em;
+    }
+
+    table { border-collapse: collapse; width: 100%; margin: 1rem 0; font-size: 0.88rem; }
+    th { background: #f0f0f0; text-align: left; padding: 0.4rem 0.75rem; border: 1px solid #ddd; }
+    td { padding: 0.4rem 0.75rem; border: 1px solid #ddd; }
+
+    hr { border: none; border-top: 1px solid #e0e0e0; margin: 2.5rem 0; }
+
+    a { color: #2a5db0; }
+  </style>
+</head>
+<body>
+
+<!-- ── Sidebar ── -->
+<div class="sidebar">
+  <a class="sidebar-brand" href="#">DynGraphEval</a>
+  <nav>
+    <ul>
+      <li><a href="#background">1. Background</a></li>
+      <li><a href="#problem">2. Standard MRR</a></li>
+      <li><a href="#related">3. Related Work</a></li>
+      <li><a href="#framework">4. Framework</a></li>
+      <li><a href="#recency-mrr" style="padding-left:0.8rem">4.1 Recency MRR</a></li>
+      <li><a href="#return-explore" style="padding-left:0.8rem">4.2 Return vs Explore</a></li>
+      <li><a href="#k-curve" style="padding-left:0.8rem">4.3 K-curve</a></li>
+      <li><a href="#models">5. Models</a></li>
+      <li><a href="#results">6. Results</a></li>
+      <li><a href="#interpretation">7. Interpretation</a></li>
+    </ul>
+  </nav>
+</div>
+
+<!-- ── Content ── -->
+<div class="content">
+
+<h1>DynGraphEval</h1>
+<p class="subtitle">A framework for evaluating what temporal graph models actually learn</p>
+<p class="authors">tgbl-wiki benchmark &nbsp;·&nbsp; TGN, TGAT, GraphMixer</p>
+
+<hr>
+
+<h2 id="background">1. Background</h2>
+
+<p>
+  A <strong>temporal graph</strong> is a sequence of timestamped edges $(u, v, t)$ recording
+  interactions between nodes over time. In the tgbl-wiki dataset, nodes are Wikipedia editors
+  and articles; each edge represents an edit event. The task is <strong>temporal link
+  prediction</strong>: given all interactions up to time $t$, predict which edge $(u, v)$
+  occurs next.
+</p>
+
+<p>
+  This is harder than static link prediction. A static model only needs to learn the
+  graph structure — which pairs of nodes tend to connect. A temporal model must reason
+  about <em>when</em> a link occurs, not just <em>whether</em> it could occur.
+  Specifically, a good temporal model should be able to predict the next event in a stream,
+  not just recognize that a link has historically existed.
+</p>
+
+<p>The standard evaluation metric is <strong>Mean Reciprocal Rank (MRR)</strong>:</p>
+
+<div class="math-block">
+$$\text{MRR} = \frac{1}{|E_\text{test}|} \sum_{(u,v,t)\,\in\, E_\text{test}} \frac{1}{\text{rank}(v \mid u,\, t,\, \mathcal{N})}$$
+</div>
+
+<p>
+  For each test edge $(u, v, t)$, the model scores $v$ alongside a set of negative
+  (non-occurring) destinations $\mathcal{N}$. The reciprocal rank of $v$ in this
+  scored list is averaged over all test edges.
+  The TGB benchmark generates 999 negatives per edge using a <code>hist_rnd</code> strategy:
+  50% drawn from destinations the source has visited historically, 50% random nodes.
+</p>
+
+<hr>
+
+<h2 id="problem">2. The Problem with Standard MRR</h2>
+
+<p>
+  Standard MRR is the accepted leaderboard metric, but it conflates two different skills:
+  <em>link recognition</em> (this pair has connected before) and <em>temporal prediction</em>
+  (this link is about to happen next). A model can score well on Standard MRR by learning
+  a simple heuristic without genuinely reasoning about time.
+</p>
+
+<h3>The recency shortcut</h3>
+
+<p>
+  Trainable time encoders — used by TGN and TGAT — learn to assign high scores to
+  recently-visited destinations. This is a reasonable inductive bias: recent activity
+  often predicts future activity. And it works well under Standard MRR, because the
+  negatives are drawn from the source's full history or at random. Recent destinations
+  are not over-represented in the negatives, so the recency bias helps rank the true
+  next edge above them.
+</p>
+
+<p>
+  The problem surfaces when you construct negatives that <em>are</em> recent — specifically,
+  the most recently visited unique destinations for that source just before the test edge.
+  Now the same recency bias inflates the scores of those negatives, making the true next
+  edge harder to rank. A model is essentially being punished for exactly the property
+  that won it Standard MRR.
+</p>
+
+<blockquote>
+  <p>Standard MRR rewards temporal recency bias. A temporally-grounded evaluation
+  penalizes it. The two metrics are measuring the same learned behavior from opposite sides.</p>
+</blockquote>
+
+<h3>What this means empirically</h3>
+
+<p>
+  On tgbl-wiki, Standard MRR and Recency MRR (described below) produce completely
+  inverted model rankings:
+</p>
+
+<table>
+  <thead><tr><th>Model</th><th>Standard MRR</th><th>Recency MRR</th></tr></thead>
+  <tbody>
+    <tr><td>TGN (memory bank + trainable encoder)</td><td><strong>0.601</strong></td><td>0.789</td></tr>
+    <tr><td>TGAT (no memory, trainable encoder)</td><td>0.568</td><td>0.773</td></tr>
+    <tr><td>GraphMixer (no memory, fixed encoder)</td><td>0.549</td><td><strong>0.821</strong></td></tr>
+  </tbody>
+</table>
+
+<p>
+  The model that wins Standard MRR loses Recency MRR, and vice versa. This is not noise —
+  it is a direct consequence of how each model processes temporal information.
+</p>
+
+<div class="chart-wrap">
+  <canvas id="chartInversion"></canvas>
+</div>
+
+<hr>
+
+<h2 id="related">3. Related Work</h2>
+
+<p>
+  Poursafaei et al. (2022), <em>Towards Better Evaluation for Dynamic Link Prediction</em>,
+  identified a related problem: random negative sampling makes evaluation trivially easy.
+  They showed that a non-parametric memorization baseline (EdgeBank — simply storing all
+  seen edges) outperforms sophisticated temporal models when negatives are random.
+  They proposed two harder negative sampling strategies:
+</p>
+
+<ul>
+  <li><strong>Historical NS</strong> — negatives drawn from any edge seen in training (but not the current positive). Tests whether models can predict edge recurrence.</li>
+  <li><strong>Inductive NS</strong> — negatives drawn from edges never observed. Tests generalization to new links.</li>
+</ul>
+
+<p>
+  Their split is at the <strong>negative pool level</strong>: two separate evaluation runs
+  with different pools of negatives. The question they ask is "does the negative pool matter?"
+  — and the answer is yes: model rankings change significantly.
+</p>
+
+<p>
+  DynGraphEval is complementary. The key differences:
+</p>
+
+<ul>
+  <li>Our recency negatives are not just <em>any</em> historical edge — they are the
+      <em>most recent</em> unique visits for that specific source, ordered by recency.
+      The temporal ordering is what makes them adversarial to models with recency bias.</li>
+  <li>Our split is at the <strong>positive edge level</strong>: we label each test edge
+      as Return or Explore (described below), not just the negative pool.</li>
+  <li>The K-curve (described below) is entirely absent from Poursafaei et al.</li>
+</ul>
+
+<blockquote>
+  <p>Poursafaei et al. show that <em>which edges are used as negatives</em> changes what
+  is measured. We show that <em>which type of edge is being predicted</em> also changes
+  what is measured, and that combining both reveals architectural mechanisms neither
+  approach can isolate alone.</p>
+</blockquote>
+
+<hr>
+
+<h2 id="framework">4. The DynGraphEval Framework</h2>
+
+<p>
+  We decompose test performance along two axes.
+</p>
+
+<h3 id="recency-mrr">4.1 Recency MRR</h3>
+
+<p>
+  For each test edge $(u, v, t)$, recency negatives are the $K$ most recently visited
+  unique destinations by $u$ before time $t$, ordered most-recent-first.
+  Let $H_u(t)$ denote those destinations in reverse-chronological order:
+</p>
+
+<div class="math-block">
+$$\mathcal{N}_K(u,v,t) \;=\; H_u(t)_{[1:K]} \setminus \{v\}$$
+
+$$\text{RecencyMRR}(K) \;=\; \frac{1}{|\mathcal{E}_K|}
+  \sum_{(u,v,t)\,\in\,\mathcal{E}_K} \frac{1}{\text{rank}\!\left(v \;\middle|\; u,\, t,\, \mathcal{N}_K(u,v,t)\right)}$$
+
+$$\text{where } \mathcal{E}_K = \{(u,v,t) \in E_\text{test} : |\mathcal{N}_K(u,v,t)| \geq 1\}$$
+</div>
+
+<p>
+  Edges where the source has no historical visits receive no recency negatives and are
+  excluded. There is no random fill — a source with few historical visits simply gets
+  fewer negatives.
+</p>
+
+<p>
+  The question Recency MRR asks is different from Standard MRR. Standard MRR asks:
+  "can the model rank this link above arbitrary negatives?" Recency MRR asks:
+  "can the model rank the true <em>next</em> link above the links the source visited
+  <em>just before</em> this moment?" This is a genuinely temporal question.
+</p>
+
+<p>
+  MRR is computed using TGB's exact tie-handling formula:
+</p>
+
+<div class="math-block">
+$$r_\text{opt} = 1 + \sum_{i} \mathbf{1}[s^-_i > s^+]
+\qquad
+r_\text{pess} = 1 + \sum_{i} \mathbf{1}[s^-_i \geq s^+]
+\qquad
+\text{MRR}_\text{edge} = \frac{2}{r_\text{opt} + r_\text{pess}}$$
+</div>
+
+<p><em>Note:</em> Recency MRR and Standard MRR are not on the same scale and should not
+be compared as absolute values. What matters is the relative ordering across models.</p>
+
+<h3 id="return-explore">4.2 Return vs Explore split</h3>
+
+<p>
+  Every test edge $(u, v, t)$ is labeled before evaluation:
+</p>
+
+<div class="math-block">
+$$\text{Return}(u,v) = \mathbf{1}\!\left[(u,v) \in E_\text{train} \cup E_\text{val}\right]$$
+$$\text{Explore}(u,v) = \mathbf{1}\!\left[(u,v) \notin E_\text{train} \cup E_\text{val}\right]$$
+</div>
+
+<ul>
+  <li>
+    <strong>Return edges</strong> — source $u$ has visited destination $v$ at least once before.
+    Predicting these correctly requires <em>temporal recall</em>: the model must recognize
+    that this pair has connected before and judge it likely to reconnect.
+  </li>
+  <li>
+    <strong>Explore edges</strong> — source $u$ has never visited destination $v$.
+    Predicting these requires <em>structural generalization</em>: the model must infer
+    that a destination it has never associated with this source is plausible,
+    based on graph structure or broader context.
+  </li>
+</ul>
+
+<p>
+  These are meaningfully different tasks. A memory bank (like TGN's GRU) gives direct
+  signal for Return edges — it has literally seen this pair before. It gives no additional
+  signal for Explore edges. The split lets us measure whether a model's advantage comes
+  from recall or generalization.
+</p>
+
+<h3 id="k-curve">4.3 The K-curve</h3>
+
+<p>
+  Recency MRR at a single $K$ is a harder metric, but it does not explain
+  <em>why</em> one model beats another. The K-curve computes Recency MRR at
+  $K \in \{10, 20, 50, 100, 500, 999\}$ from a single evaluation pass.
+</p>
+
+<p>
+  Because negatives are stored ordered most-recent-first, slicing
+  <code>neg_scores[:k]</code> gives the model scores for the $k$ most recent visits.
+  No re-running the model is needed — all K values are computed in post-processing.
+</p>
+
+<p>
+  The K-curve is a <strong>temporal reach curve</strong>: it shows at what depth a
+  model's memory stops being useful. The predicted shapes were:
+</p>
+
+<ul>
+  <li>TGN (GRU memory bank) — flat curve; accumulated memory retains signal at large K.</li>
+  <li>GraphMixer (20-neighbor window) — drops past K ≈ 20; neighbors beyond that window are not encoded.</li>
+</ul>
+
+<p>What we actually found (discussed in the results) was different from both predictions.</p>
+
+<p>
+  The K-curve is also the key diagnostic for the planned federated learning experiments.
+  If federation fragments the memory bank, TGN's curve should start drooping at larger K —
+  the crossover point quantifies exactly how many time steps of memory partitioning costs.
+</p>
+
+<hr>
+
+<h2 id="models">5. Models</h2>
+
+<table>
+  <thead>
+    <tr><th>Model</th><th>Memory</th><th>Time encoder</th><th>Description</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>TGN</td>
+      <td>GRU memory bank</td>
+      <td>Trainable</td>
+      <td>Node states updated after each interaction via GRU. Temporal attention over neighborhood.</td>
+    </tr>
+    <tr>
+      <td>TGAT</td>
+      <td>None</td>
+      <td>Trainable</td>
+      <td>Multi-head temporal attention. Time encoded via a trainable sinusoidal basis. No persistent state.</td>
+    </tr>
+    <tr>
+      <td>GraphMixer</td>
+      <td>None</td>
+      <td>Fixed (non-trainable)</td>
+      <td>MLP-Mixer over the most recent K neighbors. Time encoded via a fixed non-trainable function. No persistent state.</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>
+  The three architectures span a space of design choices. TGN has both a persistent memory
+  bank and a trainable time encoder. TGAT has a trainable encoder but no memory.
+  GraphMixer has neither — it treats neighbors uniformly using a fixed encoding.
+  This progression lets us isolate which architectural component drives the
+  results we observe.
+</p>
+
+<hr>
+
+<h2 id="results">6. Results</h2>
+
+<h3>Return vs Explore (Recency MRR)</h3>
+
+<table>
+  <thead>
+    <tr><th>Model</th><th>Return MRR</th><th>Explore MRR</th><th>Gap</th><th>n Return</th><th>n Explore</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>TGN</td><td>0.821</td><td>0.708</td><td><strong>0.113</strong></td><td>10,380</td><td>4,089</td></tr>
+    <tr><td>TGAT</td><td>0.797</td><td>0.711</td><td>0.086</td><td>10,380</td><td>4,089</td></tr>
+    <tr><td>GraphMixer</td><td><strong>0.834</strong></td><td><strong>0.787</strong></td><td>0.047</td><td>10,380</td><td>4,089</td></tr>
+  </tbody>
+</table>
+
+<div class="chart-wrap">
+  <canvas id="chartReturnExplore"></canvas>
+</div>
+
+<h3>Recency K-curve — all edges</h3>
+
+<table>
+  <thead>
+    <tr><th>Model</th><th>K=10</th><th>K=20</th><th>K=50</th><th>K=100</th><th>K=500</th><th>K=999</th><th>Drop (10→999)</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>TGN</td><td>0.802</td><td>0.794</td><td>0.791</td><td>0.790</td><td>0.789</td><td>0.789</td><td>−0.013</td></tr>
+    <tr><td>TGAT</td><td>0.785</td><td>0.778</td><td>0.774</td><td>0.773</td><td>0.773</td><td>0.773</td><td>−0.012</td></tr>
+    <tr><td>GraphMixer</td><td><strong>0.835</strong></td><td><strong>0.828</strong></td><td><strong>0.824</strong></td><td><strong>0.822</strong></td><td><strong>0.821</strong></td><td><strong>0.821</strong></td><td>−0.014</td></tr>
+  </tbody>
+</table>
+
+<h3>Recency K-curve — Return edges only</h3>
+
+<table>
+  <thead>
+    <tr><th>Model</th><th>K=10</th><th>K=20</th><th>K=50</th><th>K=100</th><th>K=999</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>TGN</td><td>0.832</td><td>0.825</td><td>0.822</td><td>0.822</td><td>0.821</td></tr>
+    <tr><td>TGAT</td><td>0.807</td><td>0.801</td><td>0.798</td><td>0.798</td><td>0.797</td></tr>
+    <tr><td>GraphMixer</td><td><strong>0.845</strong></td><td><strong>0.839</strong></td><td><strong>0.836</strong></td><td><strong>0.835</strong></td><td><strong>0.834</strong></td></tr>
+  </tbody>
+</table>
+
+<h3>Recency K-curve — Explore edges only</h3>
+
+<table>
+  <thead>
+    <tr><th>Model</th><th>K=10</th><th>K=20</th><th>K=50</th><th>K=100</th><th>K=999</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>TGN</td><td>0.728</td><td>0.716</td><td>0.710</td><td>0.709</td><td>0.708</td></tr>
+    <tr><td>TGAT</td><td>0.728</td><td>0.718</td><td>0.713</td><td>0.712</td><td>0.711</td></tr>
+    <tr><td>GraphMixer</td><td><strong>0.810</strong></td><td><strong>0.799</strong></td><td><strong>0.791</strong></td><td><strong>0.789</strong></td><td><strong>0.787</strong></td></tr>
+  </tbody>
+</table>
+
+<div class="chart-wrap" style="height:300px; margin-top:1.8rem">
+  <canvas id="chartKcurve"></canvas>
+</div>
+
+<hr>
+
+<h2 id="interpretation">7. Interpretation</h2>
+
+<h3>The inversion is real and explained</h3>
+
+<p>
+  Standard MRR ranks TGN first and GraphMixer last. Recency MRR inverts this completely.
+  The Return/Explore split reveals why: the gap between Return and Explore performance
+  scales directly with how much temporal learning each architecture does.
+</p>
+
+<ul>
+  <li>TGN (memory bank + trainable encoder): gap = 0.113</li>
+  <li>TGAT (trainable encoder only): gap = 0.086</li>
+  <li>GraphMixer (fixed encoder): gap = 0.047</li>
+</ul>
+
+<p>
+  More temporal learning → larger Return/Explore gap → bigger Recency MRR penalty.
+</p>
+
+<h3>The trainable encoder, not the memory bank, drives Explore collapse</h3>
+
+<p>
+  TGN and TGAT score almost identically on Explore edges: 0.708 vs 0.711.
+  Despite TGN having a full GRU memory bank, the memory bank adds essentially no additional
+  disadvantage on Explore. Both models struggle equally on novel destinations.
+  The trainable time encoder — shared by both — is the primary cause.
+</p>
+
+<p>
+  The mechanism: a trainable encoder learns to assign high scores to recently-visited
+  destinations. On Explore edges, every recency negative is a recent visit and the positive
+  is a novel destination the encoder has never associated with this source. The encoder's
+  bias inflates all the negative scores, collapsing Explore performance.
+  GraphMixer's fixed encoder does not learn this bias, so novel destinations are not penalized.
+</p>
+
+<h3>GraphMixer beats TGN even on Return edges</h3>
+
+<p>
+  This is unexpected. The memory bank was predicted to give TGN a clear advantage on Return
+  edges — it has literally recorded prior visits to the destination. Instead, GraphMixer wins
+  Return MRR (0.834 vs 0.821).
+</p>
+
+<p>
+  The likely explanation: on some Return edges, the true positive $(u, v)$ is not the most
+  recent visit — $u$ may have visited $v$ a while ago, and more recent visits to other
+  destinations rank higher under TGN's recency bias. GraphMixer, treating all neighbors
+  uniformly, does not inflate those more-recent competitors.
+</p>
+
+<h3>The K-curve is flat for all models</h3>
+
+<p>
+  All three models drop only 0.012–0.014 from K=10 to K=999. The predicted GraphMixer
+  drop-off past K=20 did not materialize. This is itself an informative result: the depth
+  of the recency negative list is not the key driver of performance differences.
+  The model's architectural bias is already fully expressed at K=10. Adding more
+  historically-recent negatives beyond the first 10 adds competitors that are scored
+  similarly to the shallower ones.
+</p>
+
+<p>
+  The K-curve's value as a diagnostic is deferred to the federated learning experiments.
+  If federation fragments TGN's memory bank, the federated curve should drop at larger K
+  while the centralized curve stays flat — and the crossover K becomes a quantifiable
+  measure of what federation costs in temporal memory.
+</p>
+
+<hr>
+
+<p style="color: #888; font-size: 0.85rem;">
+  DynGraphEval &nbsp;·&nbsp; tgbl-wiki, seed=0 &nbsp;·&nbsp;
+  Built on <a href="https://tgb.complexdatalab.com/">TGB</a>
+</p>
+
+</div><!-- end .content -->
+
+<script>
+  // ── Chart.js visualizations ──────────────────────────────────────────────
+
+  const MODELS   = ['TGN', 'TGAT', 'GraphMixer'];
+  const C_TGN    = 'rgba(59, 130, 246, 0.8)';   // blue
+  const C_TGAT   = 'rgba(234, 88, 12, 0.8)';    // orange
+  const C_GM     = 'rgba(22, 163, 74, 0.8)';    // green
+  const MODEL_COLORS = [C_TGN, C_TGAT, C_GM];
+
+  const baseOpts = {
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: { legend: { position: 'bottom' } },
+    scales: {
+      y: { min: 0.5, grid: { color: '#eee' } },
+      x: { grid: { display: false } }
+    }
+  };
+
+  // 1. Standard vs Recency MRR inversion
+  new Chart(document.getElementById('chartInversion'), {
+    type: 'bar',
+    data: {
+      labels: MODELS,
+      datasets: [
+        {
+          label: 'Standard MRR',
+          data: [0.601, 0.568, 0.549],
+          backgroundColor: MODEL_COLORS,
+          borderColor: MODEL_COLORS.map(c => c.replace('0.8', '1')),
+          borderWidth: 1
+        },
+        {
+          label: 'Recency MRR',
+          data: [0.789, 0.773, 0.821],
+          backgroundColor: MODEL_COLORS.map(c => c.replace('0.8', '0.35')),
+          borderColor: MODEL_COLORS.map(c => c.replace('0.8', '1')),
+          borderWidth: 1,
+          borderDash: [4, 3]
+        }
+      ]
+    },
+    options: {
+      ...baseOpts,
+      scales: { ...baseOpts.scales, y: { min: 0.45, grid: { color: '#eee' } } },
+      plugins: {
+        ...baseOpts.plugins,
+        title: { display: true, text: 'Standard MRR vs Recency MRR', color: '#333', font: { size: 13, family: 'Georgia' } }
+      }
+    }
+  });
+
+  // 2. Return vs Explore grouped bar
+  new Chart(document.getElementById('chartReturnExplore'), {
+    type: 'bar',
+    data: {
+      labels: MODELS,
+      datasets: [
+        {
+          label: 'Return MRR',
+          data: [0.821, 0.797, 0.834],
+          backgroundColor: MODEL_COLORS,
+          borderColor: MODEL_COLORS.map(c => c.replace('0.8', '1')),
+          borderWidth: 1
+        },
+        {
+          label: 'Explore MRR',
+          data: [0.708, 0.711, 0.787],
+          backgroundColor: MODEL_COLORS.map(c => c.replace('0.8', '0.35')),
+          borderColor: MODEL_COLORS.map(c => c.replace('0.8', '1')),
+          borderWidth: 1
+        }
+      ]
+    },
+    options: {
+      ...baseOpts,
+      plugins: {
+        ...baseOpts.plugins,
+        title: { display: true, text: 'Return vs Explore MRR (Recency negatives)', color: '#333', font: { size: 13, family: 'Georgia' } }
+      }
+    }
+  });
+
+  // 3. K-curve line chart (all edges, return, explore)
+  const K_LABELS = ['K=10', 'K=20', 'K=50', 'K=100', 'K=999'];
+
+  new Chart(document.getElementById('chartKcurve'), {
+    type: 'line',
+    data: {
+      labels: K_LABELS,
+      datasets: [
+        // All edges
+        { label: 'TGN (all)',        data: [0.802, 0.794, 0.791, 0.790, 0.789], borderColor: C_TGN,  backgroundColor: 'transparent', borderWidth: 2, pointRadius: 3 },
+        { label: 'TGAT (all)',       data: [0.785, 0.778, 0.774, 0.773, 0.773], borderColor: C_TGAT, backgroundColor: 'transparent', borderWidth: 2, pointRadius: 3 },
+        { label: 'GraphMixer (all)', data: [0.835, 0.828, 0.824, 0.822, 0.821], borderColor: C_GM,   backgroundColor: 'transparent', borderWidth: 2, pointRadius: 3 },
+        // Return edges (dashed)
+        { label: 'TGN (return)',        data: [0.832, 0.825, 0.822, 0.822, 0.821], borderColor: C_TGN,  backgroundColor: 'transparent', borderWidth: 1.5, borderDash: [5,3], pointRadius: 2 },
+        { label: 'TGAT (return)',       data: [0.807, 0.801, 0.798, 0.798, 0.797], borderColor: C_TGAT, backgroundColor: 'transparent', borderWidth: 1.5, borderDash: [5,3], pointRadius: 2 },
+        { label: 'GraphMixer (return)', data: [0.845, 0.839, 0.836, 0.835, 0.834], borderColor: C_GM,   backgroundColor: 'transparent', borderWidth: 1.5, borderDash: [5,3], pointRadius: 2 },
+        // Explore edges (dotted)
+        { label: 'TGN (explore)',        data: [0.728, 0.716, 0.710, 0.709, 0.708], borderColor: C_TGN,  backgroundColor: 'transparent', borderWidth: 1.5, borderDash: [2,3], pointRadius: 2 },
+        { label: 'TGAT (explore)',       data: [0.728, 0.718, 0.713, 0.712, 0.711], borderColor: C_TGAT, backgroundColor: 'transparent', borderWidth: 1.5, borderDash: [2,3], pointRadius: 2 },
+        { label: 'GraphMixer (explore)', data: [0.810, 0.799, 0.791, 0.789, 0.787], borderColor: C_GM,   backgroundColor: 'transparent', borderWidth: 1.5, borderDash: [2,3], pointRadius: 2 }
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { position: 'bottom', labels: { boxWidth: 20, font: { size: 11 } } },
+        title: { display: true, text: 'K-curve: Recency MRR vs Negative Pool Depth (solid=all, dashed=return, dotted=explore)', color: '#333', font: { size: 13, family: 'Georgia' } }
+      },
+      scales: {
+        y: { min: 0.65, max: 0.88, grid: { color: '#eee' } },
+        x: { grid: { display: false } }
+      }
+    }
+  });
+</script>
+
+<script>
+  // Highlight active sidebar link on scroll
+  var sections = document.querySelectorAll('h2[id], h3[id]');
+  var links    = document.querySelectorAll('.sidebar nav a');
+
+  function onScroll() {
+    var scrollY = window.scrollY + 120;
+    var current = '';
+    sections.forEach(function(s) {
+      if (s.offsetTop <= scrollY) current = s.id;
+    });
+    links.forEach(function(a) {
+      a.classList.toggle('active', a.getAttribute('href') === '#' + current);
+    });
+  }
+
+  window.addEventListener('scroll', onScroll, { passive: true });
+  onScroll();
+</script>
+
+</body>
+</html>

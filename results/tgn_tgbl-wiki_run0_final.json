@@ -1,0 +1,9 @@
+{
+    "model": "tgn",
+    "dataset": "tgbl-wiki",
+    "standard_mrr": 0.601,
+    "recency_mrr": 0.7892,
+    "num_neg_standard": 999,
+    "num_neg_recency": "last-999",
+    "notes": "standard=all TGB hist_rnd; recency=last-K unique visits no random fill"
+}

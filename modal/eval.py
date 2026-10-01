@@ -15,6 +15,7 @@ import datetime
 import time
 
 import modal
+import mlflow
 
 # ── Image (same deps as train.py) ─────────────────────────────────────────────
 image = (
@@ -34,6 +35,7 @@ image = (
         "wandb",
         "scikit-learn",
         "scipy",
+        "mlflow>=2.14",
     )
     .add_local_dir(".", remote_path="/repo", copy=True)
 )
@@ -44,6 +46,30 @@ DATASETS_DIR    = f"{VOLUME_PATH}/datasets"
 CHECKPOINTS_DIR = f"{VOLUME_PATH}/checkpoints"
 
 app = modal.App("dyngrapheval-eval")
+
+
+def _flatten_results(results: dict) -> dict:
+    """Flatten the nested eval results dict into scalar MLflow metrics."""
+    flat = {
+        "standard_mrr":         results.get("standard_mrr"),
+        "standard_mrr_return":  results.get("standard_mrr_return"),
+        "standard_mrr_explore": results.get("standard_mrr_explore"),
+        "recency_mrr":          results.get("recency_mrr"),
+        "n_scored":             results.get("n_scored"),
+    }
+    for k, v in results.get("recency_k_curve", {}).items():
+        flat[f"recency_{k}"] = v
+    for k, v in results.get("recency_return", {}).items():
+        if k != "n":
+            flat[f"recency_return_{k}"] = v
+        else:
+            flat["recency_return_n"] = v
+    for k, v in results.get("recency_explore", {}).items():
+        if k != "n":
+            flat[f"recency_explore_{k}"] = v
+        else:
+            flat["recency_explore_n"] = v
+    return {k: v for k, v in flat.items() if v is not None}
 
 
 @app.function(
@@ -232,13 +258,31 @@ def evaluate(
     )
     results = ev.run(m, model_name=model, skip_standard=skip_standard, standard_mrr=standard_mrr)
 
-    # Save results to Modal Volume so they persist across runs
-    results_dir = os.path.join(VOLUME_PATH, "results")
-    os.makedirs(results_dir, exist_ok=True)
-    ts = time.strftime("%Y%m%d_%H%M%S")
-    volume_path = os.path.join(results_dir, f"{model}_{dataset}_{ts}.json")
-    with open(volume_path, "w") as f:
-        json.dump(results, f, indent=2)
+    # ── Log to MLflow on Modal Volume ─────────────────────────────────────────
+    _mlflow_uri = os.environ.get("MLFLOW_TRACKING_URI", f"sqlite:////{VOLUME_PATH}/mlflow.db")
+    mlflow.set_tracking_uri(_mlflow_uri)
+    mlflow.set_experiment("dyngrapheval-eval")
+    with mlflow.start_run(run_name=f"{model}_{dataset}_seed{seed}"):
+        mlflow.set_tags({"model": model, "dataset": dataset, "seed": str(seed)})
+        mlflow.log_params({
+            "model":      model,
+            "dataset":    dataset,
+            "seed":       seed,
+            "num_neg":    num_neg,
+            "checkpoint": str(checkpoint),
+        })
+        mlflow.log_metrics(_flatten_results(results))
+        # Save result JSON to volume and log as artifact
+        results_dir = os.path.join(VOLUME_PATH, "results")
+        os.makedirs(results_dir, exist_ok=True)
+        ts = time.strftime("%Y%m%d_%H%M%S")
+        volume_path = os.path.join(results_dir, f"{model}_{dataset}_{ts}.json")
+        with open(volume_path, "w") as f:
+            json.dump(results, f, indent=2)
+        mlflow.log_artifact(volume_path, artifact_path="results")
+        if checkpoint and os.path.isfile(str(checkpoint)):
+            mlflow.log_artifact(checkpoint, artifact_path="checkpoints")
+
     volume.commit()
     print(f"[eval] Results saved to volume: {volume_path}")
 
@@ -282,3 +326,18 @@ def main(
     with open(out_path, "w") as f:
         json.dump(result, f, indent=2)
     print(f"\nSaved → {out_path}")
+
+    # ── Log to local MLflow (no volume sync needed) ───────────────────────────
+    mlflow.set_tracking_uri("sqlite:///mlflow.db")
+    mlflow.set_experiment("dyngrapheval-eval")
+    with mlflow.start_run(run_name=f"{model}_{dataset}_seed{seed}"):
+        mlflow.set_tags({"model": model, "dataset": dataset, "seed": str(seed)})
+        mlflow.log_params({
+            "model":   model,
+            "dataset": dataset,
+            "seed":    seed,
+            "num_neg": num_neg,
+        })
+        mlflow.log_metrics(_flatten_results(result))
+        mlflow.log_artifact(out_path, artifact_path="results")
+    print("MLflow run logged locally → run `mlflow ui` to view")

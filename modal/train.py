@@ -43,6 +43,7 @@ image = (
         "wandb",
         "scikit-learn",
         "scipy",
+        "mlflow>=2.14",
     )
     .add_local_dir(".", remote_path="/repo", copy=True)
 )
@@ -143,6 +144,8 @@ class TrainJob:
             cmd += ["--num_heads", str(num_heads)]
         env = os.environ.copy()
         env["PYTHONUNBUFFERED"] = "1"
+        env["MLFLOW_TRACKING_URI"]    = f"sqlite:////{VOLUME_PATH}/mlflow.db"
+        env["MLFLOW_EXPERIMENT_NAME"] = "dyngrapheval-training"
 
         try:
             proc = subprocess.Popen(

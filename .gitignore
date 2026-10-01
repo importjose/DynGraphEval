@@ -147,9 +147,9 @@ activemq-data/
 # SageMath parsed files
 *.sage.py
 
-# Environments
+# Environments (override: .envrc is tracked — safe project-local config)
 .env
-.envrc
+
 .venv
 env/
 venv/
@@ -222,3 +222,7 @@ checkpoints/       # model weights — too large for git, keep on Modal Volume
 datasets/          # TGB datasets — downloaded at runtime
 neg_cache/         # generated negative samples — reproducible, not needed in git
 results/           # eval output JSONs — regenerate from checkpoints
+
+# MLflow
+mlflow.db
+mlruns/

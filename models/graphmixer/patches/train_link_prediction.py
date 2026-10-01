@@ -53,6 +53,7 @@ from utils.metrics import LossFunction
 from tgb.linkproppred.evaluate import Evaluator
 import pickle as pk
 import wandb
+import mlflow
 
 # Print training loss to stdout every this many batches
 LOG_EVERY_N_BATCHES = 200
@@ -132,6 +133,12 @@ if __name__ == "__main__":
     warnings.filterwarnings('ignore')
 
     args = get_link_prediction_args(is_evaluation=False)
+
+    # ── MLflow setup ─────────────────────────────────────────────────────────
+    _mlflow_uri = os.environ.get("MLFLOW_TRACKING_URI", "sqlite:///mlflow.db")
+    _mlflow_exp = os.environ.get("MLFLOW_EXPERIMENT_NAME", "dyngrapheval-training")
+    mlflow.set_tracking_uri(_mlflow_uri)
+    mlflow.set_experiment(_mlflow_exp)
 
     # ── Logger: DEBUG to file, WARNING to console (unchanged from upstream) ──
     logging.basicConfig(level=logging.INFO)
@@ -213,6 +220,30 @@ if __name__ == "__main__":
         print(f"\n{'='*60}")
         print(f"Run {run + 1}/{args.num_runs}  |  model: {args.model_name}  |  dataset: {args.dataset_name}")
         print(f"{'='*60}")
+
+        _mlflow_run = mlflow.start_run(
+            run_name=f"{args.model_name}_{args.dataset_name}_seed{run}"
+        )
+        mlflow.set_tags({
+            "model":   args.model_name,
+            "dataset": args.dataset_name,
+            "seed":    str(run),
+        })
+        mlflow.log_params({
+            "model":          args.model_name,
+            "dataset":        args.dataset_name,
+            "seed":           run,
+            "epochs":         args.num_epochs,
+            "patience":       args.patience,
+            "batch_size":     args.batch_size,
+            "num_layers":     args.num_layers,
+            "num_heads":      getattr(args, "num_heads", None),
+            "output_dim":     args.output_dim,
+            "time_feat_dim":  args.time_feat_dim,
+            "num_neighbors":  args.num_neighbors,
+            "dropout":        args.dropout,
+            "lr":             args.learning_rate,
+        })
         logger.info(f"********** Run {run + 1} starts. **********")
         logger.info(f'configuration is {args}')
 
@@ -494,6 +525,10 @@ if __name__ == "__main__":
             print(f"  Train done in {train_elapsed:.0f}s | "
                   f"loss: {mean_train_loss:.4f} | {eval_metric_name}: {mean_train_mrr:.4f}"
                   f"{_gpu_mem_str(args.device)}")
+            mlflow.log_metrics({
+                "train_loss": mean_train_loss,
+                "train_mrr":  mean_train_mrr,
+            }, step=epoch)
 
             # Free GPU memory before checkpointing / validation
             if torch.cuda.is_available():
@@ -547,6 +582,10 @@ if __name__ == "__main__":
             print(f"  Val done in {val_elapsed:.0f}s | "
                   f"val {eval_metric_name}: {mean_val_mrr:.4f} | "
                   f"val loss: {np.mean(val_losses):.4f}")
+            mlflow.log_metrics({
+                "val_mrr":  mean_val_mrr,
+                "val_loss": float(np.mean(val_losses)),
+            }, step=epoch)
 
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
@@ -622,6 +661,11 @@ if __name__ == "__main__":
         print(f"  Val  {eval_metric_name}: {val_metric_dict.get(eval_metric_name, 0):.4f}")
         print(f"  (test eval skipped — use modal/eval.py for test set scoring)")
         print(f"{'='*60}")
+
+        mlflow.log_metrics({f"final_val_{k}": v for k, v in val_metric_dict.items()})
+        mlflow.log_metric("run_time_min", single_run_time / 60)
+        mlflow.log_metric("peak_gpu_mem_mb", max_mem_mb)
+        mlflow.end_run()
 
         logger.info(f'Run {run + 1} cost {single_run_time:.2f}s. '
                     f'Max GPU mem: {max_mem_mb:.0f} MB')

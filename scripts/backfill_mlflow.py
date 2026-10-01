@@ -99,9 +99,21 @@ def main():
                 "source_file": fname,
             })
             mlflow.log_params({
-                "model":   model,
-                "dataset": dataset,
-                "seed":    args.default_seed,
+                "model":                    model,
+                "dataset":                  dataset,
+                "seed":                     args.default_seed,
+                # Training defaults from modal/train.py used for all existing runs
+                "epochs":                   50,
+                "patience":                 5,
+                "batch_size":               200,
+                "num_layers":               2,
+                "num_heads":                2,
+                "output_dim":               100,
+                "time_feat_dim":            100,
+                "num_neighbors":            20,
+                "dropout":                  0.1,
+                "lr":                       0.0001,
+                "sample_neighbor_strategy": "recent",
             })
             mlflow.log_metrics(_flatten_results(results))
             mlflow.log_artifact(fpath, artifact_path="results")

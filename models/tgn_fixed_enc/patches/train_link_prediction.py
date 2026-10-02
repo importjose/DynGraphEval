@@ -194,9 +194,6 @@ if __name__ == "__main__":
     val_idx_data_loader = get_idx_data_loader(
         indices_list=list(range(_val_n)),
         batch_size=_val_bs, shuffle=False)
-    val_idx_data_loader_full = get_idx_data_loader(
-        indices_list=list(range(len(val_data.src_node_ids))),
-        batch_size=_val_bs, shuffle=False)
     test_idx_data_loader = get_idx_data_loader(
         indices_list=list(range(len(test_data.src_node_ids))),
         batch_size=_val_bs, shuffle=False)
@@ -637,34 +634,15 @@ if __name__ == "__main__":
                 print(f"  Early stopping triggered (patience={args.patience}).")
                 break
 
-        # ── Final evaluation on best checkpoint ───────────────────────────────
+        # ── Load best checkpoint ──────────────────────────────────────────────
         print(f"\nLoading best checkpoint (epoch {early_stopping.best_epoch})...")
-        logger.info(f'---------Load the best parameters at epoch {early_stopping.best_epoch}-------')
         early_stopping.load_checkpoint(model)
 
-        logger.info(f'---------get final performance on dataset {args.dataset_name}-------')
-
-        print("Running final val evaluation (full val set)...")
-        val_losses, val_metrics = evaluate_model_link_prediction(
-            dataset_name=args.dataset_name, model_name=args.model_name,
-            model=model, dtype='val', eval_metric_name=eval_metric_name,
-            neighbor_sampler=full_neighbor_sampler,
-            evaluate_idx_data_loader=val_idx_data_loader_full,
-            evaluate_neg_edge_sampler=eval_neg_edge_sampler,
-            evaluator=evaluator, evaluate_data=val_data,
-            loss_func=loss_func, num_neighbors=args.num_neighbors,
-            time_gap=args.time_gap, logger=logger)
-
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-
-        val_metric_dict = {}
-
-        logger.info(f'validate loss: {np.mean(val_losses):.4f}')
-        for metric_name in val_metrics[0].keys():
-            avg = np.mean([m[metric_name] for m in val_metrics])
-            logger.info(f'validate {metric_name}: {avg:.4f}')
-            val_metric_dict[metric_name] = avg
+        # Use best val metrics already tracked by early stopping — no need to
+        # re-run the expensive full val pass (use modal/eval.py for test eval).
+        val_metric_dict = {
+            k: v for k, v in early_stopping.best_metrics.items()
+        } if hasattr(early_stopping, 'best_metrics') and early_stopping.best_metrics else {}
 
         single_run_time = time.time() - run_start_time
         max_mem_mb = torch.cuda.max_memory_allocated(device=args.device) / 1024 / 1024 \
@@ -673,34 +651,24 @@ if __name__ == "__main__":
         print(f"\n{'='*60}")
         print(f"Run {run + 1} complete in {single_run_time/60:.1f} min  |  "
               f"Peak GPU mem: {max_mem_mb:.0f} MB")
-        print(f"  Val  {eval_metric_name}: {val_metric_dict.get(eval_metric_name, 0):.4f}")
-        print(f"  (test eval skipped — use modal/eval.py for test set scoring)")
+        print(f"  Best val {eval_metric_name}: {val_metric_dict.get(eval_metric_name, early_stopping.best_metrics):.4f}"
+              f"  (epoch {early_stopping.best_epoch})")
+        print(f"  Run modal/eval.py for test set scoring.")
         print(f"{'='*60}")
 
-        mlflow.log_metrics({f"final_val_{k}": v for k, v in val_metric_dict.items()})
+        mlflow.log_metrics({f"best_val_{k}": v for k, v in val_metric_dict.items()
+                            if isinstance(v, (int, float))})
         mlflow.log_metric("run_time_min", single_run_time / 60)
         mlflow.log_metric("peak_gpu_mem_mb", max_mem_mb)
+        mlflow.log_metric("best_epoch", early_stopping.best_epoch)
         mlflow.end_run()
 
         logger.info(f'Run {run + 1} cost {single_run_time:.2f}s. '
                     f'Max GPU mem: {max_mem_mb:.0f} MB')
 
-        wandb_logger.log_run(
-            val_losses=val_losses, val_metrics=val_metrics,
-            test_losses=[], test_metrics=[])
         wandb_logger.finish()
 
         val_metric_all_runs.append(val_metric_dict)
-
-        result_json = json.dumps({
-            "validate metrics": {k: str(v) for k, v in val_metric_dict.items()},
-        }, indent=4)
-        save_result_path = (
-            f"./saved_results/{args.prefix}_link_{args.dataset_name}"
-            f"_{args.model_name}_seed{args.seed}.json"
-        )
-        with open(save_result_path, 'w') as f:
-            f.write(result_json)
 
     if args.num_runs > 1:
         logger.info(f'-----------metrics over {args.num_runs} runs-----------')

@@ -245,6 +245,7 @@ if __name__ == "__main__":
             "train_loss_type":          args.train_loss_type,
             "train_neg_num":            args.train_neg_num,
             "sample_neighbor_strategy": args.sample_neighbor_strategy,
+            "freeze_time_encoder":      os.environ.get("FREEZE_TIME_ENCODER", "0") == "1",
         })
         logger.info(f"********** Run {run + 1} starts. **********")
         logger.info(f'configuration is {args}')
@@ -281,6 +282,15 @@ if __name__ == "__main__":
                 dst_node_mean_time_shift_dst=dst_node_mean_time_shift_dst,
                 dst_node_std_time_shift=dst_node_std_time_shift, device=args.device,
                 beta=args.pint_beta, num_hop=args.pint_hop)
+            # ── Ablation: freeze TimeEncoder if requested ─────────────────────
+            if os.environ.get("FREEZE_TIME_ENCODER", "0") == "1":
+                frozen = []
+                for name, param in dynamic_backbone.named_parameters():
+                    if 'time_encoder' in name.lower():
+                        param.requires_grad = False
+                        frozen.append(name)
+                print(f"  [ablation] Froze TimeEncoder ({len(frozen)} params): {frozen}",
+                      flush=True)
         elif args.model_name == 'TPNet':
             dynamic_backbone = TPNet(
                 node_raw_features=node_raw_features, edge_raw_features=edge_raw_features,

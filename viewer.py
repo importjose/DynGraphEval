@@ -32,13 +32,15 @@ K_LABELS = [f"K={k}" for k in K_VALS]
 # Display order and colors per model.
 # EdgeBank is shown last as the memorization floor reference.
 MODEL_META = {
-    "graphmixer": {"label": "GraphMixer", "color": "#16a34a"},
-    "tgn":        {"label": "TGN",        "color": "#3b82f6"},
-    "tgat":       {"label": "TGAT",       "color": "#ea580c"},
-    "tpnet":      {"label": "TPNet",      "color": "#7c3aed"},
-    "fl_tgn":     {"label": "FL-TGN",     "color": "#0891b2"},
-    "fedlink":    {"label": "FedLink",    "color": "#be185d"},
-    "edgebank":   {"label": "EdgeBank",   "color": "#6b7280"},
+    "graphmixer":    {"label": "GraphMixer",    "color": "#16a34a"},
+    "tgn":           {"label": "TGN",           "color": "#3b82f6"},
+    "tgn_fixed_enc": {"label": "TGN+FixedEnc",  "color": "#9333ea"},
+    "tgat":          {"label": "TGAT",          "color": "#ea580c"},
+    "tgat_fixed_enc":{"label": "TGAT+FixedEnc", "color": "#f59e0b"},
+    "tpnet":         {"label": "TPNet",         "color": "#7c3aed"},
+    "fl_tgn":        {"label": "FL-TGN",        "color": "#0891b2"},
+    "fedlink":       {"label": "FedLink",       "color": "#be185d"},
+    "edgebank":      {"label": "EdgeBank",      "color": "#6b7280"},
 }
 
 def model_label(m: str) -> str:

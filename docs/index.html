@@ -157,7 +157,7 @@
 
 <h1>DynGraphEval</h1>
 <p class="subtitle">A framework for evaluating what temporal graph models actually learn</p>
-<p class="authors">tgbl-wiki benchmark &nbsp;·&nbsp; TGN, TGN+FixedEnc, TGAT, GraphMixer, EdgeBank</p>
+<p class="authors">tgbl-wiki benchmark &nbsp;·&nbsp; TGN, TGN+FixedEnc, TGAT, TGAT+FixedEnc, GraphMixer, EdgeBank</p>
 
 <hr>
 
@@ -394,6 +394,7 @@ should not be compared across metrics. What matters is relative ordering within 
   <tbody>
     <tr><td>TGN+FixedEnc (memory bank + fixed encoder)</td><td><strong>0.692</strong></td><td>0.804</td></tr>
     <tr><td>TGN (memory bank + trainable encoder)</td><td>0.601</td><td>0.789</td></tr>
+    <tr><td>TGAT+FixedEnc (no memory, fixed encoder)</td><td>0.586</td><td>0.774</td></tr>
     <tr><td>TGAT (no memory, trainable encoder)</td><td>0.568</td><td>0.773</td></tr>
     <tr><td>GraphMixer (no memory, fixed encoder)</td><td>0.549</td><td><strong>0.821</strong></td></tr>
     <tr style="color:#666"><td>EdgeBank (memorization baseline)</td><td>0.495</td><td>0.362</td></tr>
@@ -403,8 +404,9 @@ should not be compared across metrics. What matters is relative ordering within 
 <p>
   The model that wins Standard MRR (TGN+FixedEnc) loses Recency MRR. The model that wins
   Recency MRR (GraphMixer) finishes last on Standard. The rankings are completely inverted.
-  Notably, freezing TGN's time encoder (TGN+FixedEnc) improves Standard MRR by 0.091 —
-  the learnable encoder actively hurts Standard MRR by inflating recency negative scores.
+  Notably, freezing the time encoder never hurts and often helps — TGN+FixedEnc beats TGN
+  by 0.091 on Standard MRR, and TGAT+FixedEnc matches TGAT on every metric.
+  The learnable time encoder provides no benefit in any configuration tested.
   EdgeBank sits just below the neural models on Standard, and far below them on Recency.
 </p>
 
@@ -427,6 +429,7 @@ should not be compared across metrics. What matters is relative ordering within 
   <tbody>
     <tr><td>TGN+FixedEnc</td><td>+0.197</td><td>+0.442</td><td>2.2×</td></tr>
     <tr><td>TGN</td><td>+0.106</td><td>+0.427</td><td>4.0×</td></tr>
+    <tr><td>TGAT+FixedEnc</td><td>+0.091</td><td>+0.412</td><td>4.5×</td></tr>
     <tr><td>TGAT</td><td>+0.073</td><td>+0.411</td><td>5.6×</td></tr>
     <tr><td>GraphMixer</td><td>+0.054</td><td>+0.459</td><td>8.5×</td></tr>
   </tbody>
@@ -477,10 +480,11 @@ $$\text{Return}(u,v) = \mathbf{1}\!\left[(u,v) \in E_\text{train} \cup E_\text{v
     <tr><th>Model</th><th>Return MRR</th><th>Explore MRR</th><th>Gap</th></tr>
   </thead>
   <tbody>
-    <tr><td>TGN+FixedEnc</td><td>0.837</td><td>0.720</td><td>0.117</td></tr>
+    <tr><td>TGN+FixedEnc</td><td><strong>0.837</strong></td><td>0.720</td><td>0.117</td></tr>
     <tr><td>TGN</td><td>0.821</td><td>0.708</td><td>0.113</td></tr>
+    <tr><td>TGAT+FixedEnc</td><td>0.800</td><td>0.710</td><td>0.090</td></tr>
     <tr><td>TGAT</td><td>0.797</td><td>0.711</td><td>0.086</td></tr>
-    <tr><td>GraphMixer</td><td><strong>0.834</strong></td><td><strong>0.787</strong></td><td><strong>0.047</strong></td></tr>
+    <tr><td>GraphMixer</td><td>0.834</td><td><strong>0.787</strong></td><td><strong>0.047</strong></td></tr>
     <tr style="color:#666"><td>EdgeBank</td><td>0.392</td><td>0.284</td><td>0.108</td></tr>
   </tbody>
 </table>
@@ -489,15 +493,15 @@ $$\text{Return}(u,v) = \mathbf{1}\!\left[(u,v) \in E_\text{train} \cup E_\text{v
   <canvas id="chartReturnExplore"></canvas>
 </div>
 
-<h3>The Return/Explore gap scales with recency bias, not memory</h3>
+<h3>The Return/Explore gap scales with the memory bank, not the encoder</h3>
 
 <p>
-  TGN+FixedEnc has the largest gap (0.117) — its memory bank drives strong Return recall but
-  does not help Explore. TGN is nearly identical (0.113). GraphMixer (fixed encoder, no memory)
-  has the smallest gap (0.047). The gap tracks the trainable time encoder, not the memory bank:
-  both TGN variants (trainable vs fixed encoder) show similar gaps, while the encoder-type
-  difference (GraphMixer vs TGN) is much larger. The gap is the price a model pays for learning
-  recency bias in its encoder.
+  Models with a memory bank (TGN, TGN+FixedEnc) have larger gaps (0.113–0.117) than models
+  without (TGAT, TGAT+FixedEnc, GraphMixer: 0.047–0.090). Within each architecture, switching
+  the encoder from trainable to fixed barely changes the gap: TGN → TGN+FixedEnc (0.113 → 0.117),
+  TGAT → TGAT+FixedEnc (0.086 → 0.090). The memory bank specializes the model toward Return
+  edges by explicitly tracking prior visits, widening the gap by making Return MRR much higher
+  without a corresponding Explore improvement.
 </p>
 
 <p>
@@ -506,22 +510,26 @@ $$\text{Return}(u,v) = \mathbf{1}\!\left[(u,v) \in E_\text{train} \cup E_\text{v
   (never seen) while all recency negatives score 1. The positive cannot win.
 </p>
 
-<h3>The trainable encoder, not the memory bank, drives Explore collapse</h3>
+<h3>The trainable encoder provides no benefit — in any configuration</h3>
 
 <p>
-  TGN and TGAT score nearly identically on Explore edges: <strong>0.708 vs 0.711</strong>.
-  TGN+FixedEnc reaches 0.720 on Explore — a modest improvement from freezing the encoder.
-  Despite having a full GRU memory bank, TGN gives no advantage over TGAT on Explore.
-  The shared culprit is the trainable time encoder: it learns to assign high scores to
-  recently-visited destinations. On Explore edges, every recency negative is a recent visit
-  while the positive is novel. The encoder's recency bias inflates the negative scores and
-  collapses Explore performance regardless of whether a memory bank is present.
+  Comparing encoder types within each architecture:
 </p>
-
+<ul>
+  <li><strong>TGN vs TGN+FixedEnc</strong>: freezing the encoder improves every metric. Standard MRR +0.091, Recency MRR +0.015, Explore MRR +0.012.</li>
+  <li><strong>TGAT vs TGAT+FixedEnc</strong>: freezing the encoder changes nothing. Recency MRR +0.001, Explore MRR −0.001 — within noise.</li>
+</ul>
 <p>
-  GraphMixer's fixed encoder does not learn this bias. Novel destinations are not penalized,
-  which is why GraphMixer Explore MRR (0.787) is 0.067 above TGN+FixedEnc (0.720) and 0.079
-  above TGN (0.708) — despite both TGN variants having a memory bank designed to track returns.
+  In neither case does the trainable encoder help. It either actively hurts (TGN) or is
+  completely neutral (TGAT). The learnable time encoder is spending model capacity on
+  something that contributes nothing — a fixed sinusoidal encoding captures all the
+  temporal structure the model can use.
+</p>
+<p>
+  The Explore MRR scores for all trainable encoder models cluster tightly: TGN 0.708, TGAT 0.711,
+  TGN+FixedEnc 0.720, TGAT+FixedEnc 0.710. GraphMixer (0.787) is the clear outlier — its
+  advantage over TGAT+FixedEnc (0.077) cannot be explained by encoder type alone since both
+  use fixed encoders. The MLP-Mixer architecture itself is doing something different.
 </p>
 
 <h3>TGN+FixedEnc leads on Return edges; GraphMixer is close</h3>
@@ -561,6 +569,7 @@ $$\text{Return}(u,v) = \mathbf{1}\!\left[(u,v) \in E_\text{train} \cup E_\text{v
     <tr><td>GraphMixer</td><td><strong>0.835</strong></td><td><strong>0.828</strong></td><td><strong>0.824</strong></td><td><strong>0.822</strong></td><td><strong>0.821</strong></td><td>−0.014</td></tr>
     <tr><td>TGN+FixedEnc</td><td>0.816</td><td>0.809</td><td>0.806</td><td>0.805</td><td>0.804</td><td>−0.012</td></tr>
     <tr><td>TGN</td><td>0.802</td><td>0.794</td><td>0.791</td><td>0.790</td><td>0.789</td><td>−0.013</td></tr>
+    <tr><td>TGAT+FixedEnc</td><td>0.786</td><td>0.778</td><td>0.776</td><td>0.775</td><td>0.774</td><td>−0.012</td></tr>
     <tr><td>TGAT</td><td>0.785</td><td>0.778</td><td>0.774</td><td>0.773</td><td>0.773</td><td>−0.012</td></tr>
     <tr style="color:#666"><td>EdgeBank</td><td>0.372</td><td>0.364</td><td>0.363</td><td>0.362</td><td>0.362</td><td>−0.010</td></tr>
   </tbody>
@@ -600,7 +609,7 @@ $$\text{Return}(u,v) = \mathbf{1}\!\left[(u,v) \in E_\text{train} \cup E_\text{v
 <h2 id="models">8. Models</h2>
 
 <p>
-  Four neural architectures are evaluated, completing a 2×2 space of design choices.
+  Five neural architectures are evaluated, completing the full 2×2 space of design choices.
 </p>
 
 <table>
@@ -627,6 +636,12 @@ $$\text{Return}(u,v) = \mathbf{1}\!\left[(u,v) \in E_\text{train} \cup E_\text{v
       <td>Multi-head temporal attention over the source's recent neighbors. No persistent state.</td>
     </tr>
     <tr>
+      <td>TGAT+FixedEnc</td>
+      <td>None</td>
+      <td>Fixed (non-trainable)</td>
+      <td>Identical to TGAT but with the TimeEncoder weights frozen. Isolates the encoder contribution without a memory bank.</td>
+    </tr>
+    <tr>
       <td>GraphMixer</td>
       <td>None</td>
       <td>Fixed (non-trainable)</td>
@@ -647,7 +662,7 @@ $$\text{Return}(u,v) = \mathbf{1}\!\left[(u,v) \in E_\text{train} \cup E_\text{v
   </thead>
   <tbody>
     <tr><td><strong>Memory bank</strong></td><td>TGN ✓</td><td>TGN+FixedEnc ✓</td></tr>
-    <tr><td><strong>No memory</strong></td><td>TGAT ✓</td><td>GraphMixer ✓</td></tr>
+    <tr><td><strong>No memory</strong></td><td>TGAT ✓</td><td>TGAT+FixedEnc ✓ · GraphMixer ✓</td></tr>
   </tbody>
 </table>
 
@@ -713,33 +728,35 @@ $$\text{Return}(u,v) = \mathbf{1}\!\left[(u,v) \in E_\text{train} \cup E_\text{v
 
 <ul>
   <li>
-    <strong>Trainable time encoder</strong> (TGN, TGAT) — drives the Standard/Recency tradeoff.
-    Learns recency bias that hurts Standard MRR (TGN+FixedEnc beats TGN by 0.091) and collapses
-    Explore MRR by inflating recency negative scores. The primary cause of the Return/Explore gap.
+    <strong>Trainable time encoder</strong> (TGN, TGAT) — provides no benefit in any configuration.
+    TGN+FixedEnc beats TGN on every metric. TGAT+FixedEnc matches TGAT exactly.
+    The learnable encoder is spending model capacity on something a fixed sinusoidal encoding
+    already captures. In TGN's case it actively hurts by learning a recency bias that inflates
+    negative scores; in TGAT's case it is simply redundant.
   </li>
   <li>
-    <strong>Memory bank</strong> (TGN, TGN+FixedEnc) — provides a modest Return edge advantage
-    once the encoder's recency noise is removed. TGN+FixedEnc leads Return MRR (0.837 vs
-    GraphMixer's 0.834). Without the fixed encoder, TGN's memory bank benefit is masked by the
-    trainable encoder's cost.
+    <strong>Memory bank</strong> (TGN, TGN+FixedEnc) — drives the Return/Explore gap. With
+    encoder held fixed, TGN+FixedEnc (memory) beats TGAT+FixedEnc (no memory) by +0.037 on
+    Return and +0.010 on Explore. The memory bank specializes the model toward Return edges
+    by explicitly tracking prior visits, but doesn't help generalize to Explore edges.
   </li>
   <li>
-    <strong>Fixed time encoder</strong> (GraphMixer, TGN+FixedEnc) — the key enabler for both
-    Standard MRR and Explore MRR. Without a learned recency bias, novel destinations are not
-    penalized. TGN+FixedEnc leads Standard MRR (0.692); GraphMixer leads Recency and Explore MRR
-    — showing that memory bank + fixed encoder is the best configuration for Standard MRR, while
-    no memory + fixed encoder is best for temporal generalization.
+    <strong>GraphMixer anomaly</strong> — GraphMixer (no memory, fixed encoder) leads Recency MRR
+    (0.821) and Explore MRR (0.787), well above TGAT+FixedEnc (0.774, 0.710) which shares the
+    same encoder type and memory absence. The MLP-Mixer architecture itself is contributing
+    something beyond what encoder type and memory bank explain — likely its uniform neighbor
+    aggregation avoids the attention mechanism's tendency to focus on the most recent interactions.
   </li>
 </ul>
 
 <h3>The 2×2 matrix is complete</h3>
 
 <p>
-  The TGN+FixedEnc ablation fills the missing cell. The finding: <strong>the learnable time
-  encoder is not needed</strong>. Freezing it improves Standard MRR by 0.091. The memory bank
-  provides a small advantage on Return edges but does not close the Explore MRR gap created by
-  the trainable encoder. Architecture design should prioritize fixed time encoding over learned
-  recency bias.
+  Both ablations are done. The central finding: <strong>the learnable time encoder is not needed
+  and should be removed.</strong> A fixed sinusoidal encoder matches or exceeds it in every
+  configuration. The memory bank provides a modest, measurable Return edge advantage once encoder
+  noise is removed, but does not help Explore. GraphMixer's MLP-Mixer architecture remains an
+  outlier whose advantage on Explore edges cannot be explained by the 2×2 factors alone.
 </p>
 
 <hr>
@@ -754,17 +771,16 @@ $$\text{Return}(u,v) = \mathbf{1}\!\left[(u,v) \in E_\text{train} \cup E_\text{v
 <script>
   // ── Chart.js visualizations ──────────────────────────────────────────────
 
-  const MODELS_5 = ['TGN+FixedEnc', 'TGN', 'TGAT', 'GraphMixer', 'EdgeBank'];
-  const MODELS_4 = ['TGN', 'TGAT', 'GraphMixer', 'EdgeBank'];
-  const MODELS   = ['TGN+FixedEnc', 'TGN', 'TGAT', 'GraphMixer'];
+  const MODELS_6 = ['TGN+FixedEnc', 'TGN', 'TGAT+FixedEnc', 'TGAT', 'GraphMixer', 'EdgeBank'];
+  const MODELS   = ['TGN+FixedEnc', 'TGN', 'TGAT+FixedEnc', 'TGAT', 'GraphMixer'];
   const C_TGNFE  = 'rgba(147, 51, 234, 0.8)';
   const C_TGN    = 'rgba(59, 130, 246, 0.8)';
+  const C_TGATFE = 'rgba(245, 158, 11, 0.8)';
   const C_TGAT   = 'rgba(234, 88, 12, 0.8)';
   const C_GM     = 'rgba(22, 163, 74, 0.8)';
   const C_EB     = 'rgba(107, 114, 128, 0.8)';
-  const COLORS_5 = [C_TGNFE, C_TGN, C_TGAT, C_GM, C_EB];
-  const COLORS_4 = [C_TGN, C_TGAT, C_GM, C_EB];
-  const COLORS   = [C_TGNFE, C_TGN, C_TGAT, C_GM];
+  const COLORS_6 = [C_TGNFE, C_TGN, C_TGATFE, C_TGAT, C_GM, C_EB];
+  const COLORS   = [C_TGNFE, C_TGN, C_TGATFE, C_TGAT, C_GM];
 
   // Shared layout
   const sharedLayout = {
@@ -789,8 +805,8 @@ $$\text{Return}(u,v) = \mathbf{1}\!\left[(u,v) \in E_\text{train} \cup E_\text{v
   new Chart(document.getElementById('chartStandardOnly'), {
     type: 'bar',
     data: {
-      labels: MODELS_5,
-      datasets: [barDataset('Standard MRR', [0.692, 0.601, 0.568, 0.549, 0.495], COLORS_5, 0.8, {})]
+      labels: MODELS_6,
+      datasets: [barDataset('Standard MRR', [0.692, 0.601, 0.586, 0.568, 0.549, 0.495], COLORS_6, 0.8, {})]
     },
     options: {
       ...sharedLayout,
@@ -809,8 +825,8 @@ $$\text{Return}(u,v) = \mathbf{1}\!\left[(u,v) \in E_\text{train} \cup E_\text{v
   new Chart(document.getElementById('chartRecencyOnly'), {
     type: 'bar',
     data: {
-      labels: MODELS_5,
-      datasets: [barDataset('Recency MRR', [0.804, 0.789, 0.773, 0.821, 0.362], COLORS_5, 0.8, {})]
+      labels: MODELS_6,
+      datasets: [barDataset('Recency MRR', [0.804, 0.789, 0.774, 0.773, 0.821, 0.362], COLORS_6, 0.8, {})]
     },
     options: {
       ...sharedLayout,
@@ -829,10 +845,10 @@ $$\text{Return}(u,v) = \mathbf{1}\!\left[(u,v) \in E_\text{train} \cup E_\text{v
   new Chart(document.getElementById('chartInversion'), {
     type: 'bar',
     data: {
-      labels: MODELS_5,
+      labels: MODELS_6,
       datasets: [
-        barDataset('Standard MRR', [0.692, 0.601, 0.568, 0.549, 0.495], COLORS_5, 0.85, {}),
-        barDataset('Recency MRR',  [0.804, 0.789, 0.773, 0.821, 0.362], COLORS_5, 0.35, {})
+        barDataset('Standard MRR', [0.692, 0.601, 0.586, 0.568, 0.549, 0.495], COLORS_6, 0.85, {}),
+        barDataset('Recency MRR',  [0.804, 0.789, 0.774, 0.773, 0.821, 0.362], COLORS_6, 0.35, {})
       ]
     },
     options: {
@@ -855,8 +871,8 @@ $$\text{Return}(u,v) = \mathbf{1}\!\left[(u,v) \in E_\text{train} \cup E_\text{v
     data: {
       labels: MODELS,
       datasets: [
-        barDataset('Gap above EdgeBank — Standard MRR', [0.197, 0.106, 0.073, 0.054], COLORS, 0.85, {}),
-        barDataset('Gap above EdgeBank — Recency MRR',  [0.442, 0.427, 0.411, 0.459], COLORS, 0.35, {})
+        barDataset('Gap above EdgeBank — Standard MRR', [0.197, 0.106, 0.091, 0.073, 0.054], COLORS, 0.85, {}),
+        barDataset('Gap above EdgeBank — Recency MRR',  [0.442, 0.427, 0.412, 0.411, 0.459], COLORS, 0.35, {})
       ]
     },
     options: {
@@ -874,15 +890,15 @@ $$\text{Return}(u,v) = \mathbf{1}\!\left[(u,v) \in E_\text{train} \cup E_\text{v
 
   // ── 5. Return vs Explore (section 5) ──────────────────────────────────
   // Sort order: by Return MRR descending
-  const RE_LABELS = ['TGN+FixedEnc', 'GraphMixer', 'TGN', 'TGAT', 'EdgeBank'];
-  const RE_COLORS = [C_TGNFE, C_GM, C_TGN, C_TGAT, C_EB];
+  const RE_LABELS = ['TGN+FixedEnc', 'GraphMixer', 'TGN', 'TGAT+FixedEnc', 'TGAT', 'EdgeBank'];
+  const RE_COLORS = [C_TGNFE, C_GM, C_TGN, C_TGATFE, C_TGAT, C_EB];
   new Chart(document.getElementById('chartReturnExplore'), {
     type: 'bar',
     data: {
       labels: RE_LABELS,
       datasets: [
-        barDataset('Return MRR',  [0.837, 0.834, 0.821, 0.797, 0.392], RE_COLORS, 0.85, {}),
-        barDataset('Explore MRR', [0.720, 0.787, 0.708, 0.711, 0.284], RE_COLORS, 0.35, {})
+        barDataset('Return MRR',  [0.837, 0.834, 0.821, 0.800, 0.797, 0.392], RE_COLORS, 0.85, {}),
+        barDataset('Explore MRR', [0.720, 0.787, 0.708, 0.710, 0.711, 0.284], RE_COLORS, 0.35, {})
       ]
     },
     options: {
@@ -910,18 +926,21 @@ $$\text{Return}(u,v) = \mathbf{1}\!\left[(u,v) \in E_\text{train} \cup E_\text{v
         { label: 'GraphMixer',    data: [0.835, 0.828, 0.824, 0.822, 0.821], borderColor: C_GM,    backgroundColor: 'transparent', borderWidth: 2.5, pointRadius: 4 },
         { label: 'TGN+FixedEnc', data: [0.816, 0.809, 0.806, 0.805, 0.804], borderColor: C_TGNFE, backgroundColor: 'transparent', borderWidth: 2.5, pointRadius: 4 },
         { label: 'TGN',           data: [0.802, 0.794, 0.791, 0.790, 0.789], borderColor: C_TGN,   backgroundColor: 'transparent', borderWidth: 2.5, pointRadius: 4 },
+        { label: 'TGAT+FixedEnc', data: [0.786, 0.778, 0.776, 0.775, 0.774], borderColor: C_TGATFE, backgroundColor: 'transparent', borderWidth: 2.5, pointRadius: 4 },
         { label: 'TGAT',          data: [0.785, 0.778, 0.774, 0.773, 0.773], borderColor: C_TGAT,  backgroundColor: 'transparent', borderWidth: 2.5, pointRadius: 4 },
         { label: 'EdgeBank',      data: [0.372, 0.364, 0.363, 0.362, 0.362], borderColor: C_EB,    backgroundColor: 'transparent', borderWidth: 2,   pointRadius: 3, borderDash: [4,3] },
         // Return edges (dashed, lighter)
-        { label: 'GraphMixer (return)',    data: [0.845, 0.839, 0.836, 0.835, 0.834], borderColor: C_GM,    backgroundColor: 'transparent', borderWidth: 1.5, borderDash: [5,3], pointRadius: 2 },
-        { label: 'TGN+FixedEnc (return)', data: [0.848, 0.842, 0.839, 0.838, 0.837], borderColor: C_TGNFE, backgroundColor: 'transparent', borderWidth: 1.5, borderDash: [5,3], pointRadius: 2 },
-        { label: 'TGN (return)',           data: [0.832, 0.825, 0.822, 0.822, 0.821], borderColor: C_TGN,   backgroundColor: 'transparent', borderWidth: 1.5, borderDash: [5,3], pointRadius: 2 },
-        { label: 'TGAT (return)',          data: [0.807, 0.801, 0.798, 0.798, 0.797], borderColor: C_TGAT,  backgroundColor: 'transparent', borderWidth: 1.5, borderDash: [5,3], pointRadius: 2 },
+        { label: 'GraphMixer (return)',     data: [0.845, 0.839, 0.836, 0.835, 0.834], borderColor: C_GM,     backgroundColor: 'transparent', borderWidth: 1.5, borderDash: [5,3], pointRadius: 2 },
+        { label: 'TGN+FixedEnc (return)',  data: [0.848, 0.842, 0.839, 0.838, 0.837], borderColor: C_TGNFE,  backgroundColor: 'transparent', borderWidth: 1.5, borderDash: [5,3], pointRadius: 2 },
+        { label: 'TGN (return)',            data: [0.832, 0.825, 0.822, 0.822, 0.821], borderColor: C_TGN,    backgroundColor: 'transparent', borderWidth: 1.5, borderDash: [5,3], pointRadius: 2 },
+        { label: 'TGAT+FixedEnc (return)', data: [0.809, 0.803, 0.801, 0.800, 0.800], borderColor: C_TGATFE, backgroundColor: 'transparent', borderWidth: 1.5, borderDash: [5,3], pointRadius: 2 },
+        { label: 'TGAT (return)',           data: [0.807, 0.801, 0.798, 0.798, 0.797], borderColor: C_TGAT,   backgroundColor: 'transparent', borderWidth: 1.5, borderDash: [5,3], pointRadius: 2 },
         // Explore edges (dotted, lighter)
-        { label: 'GraphMixer (explore)',    data: [0.810, 0.799, 0.791, 0.789, 0.787], borderColor: C_GM,    backgroundColor: 'transparent', borderWidth: 1.5, borderDash: [2,3], pointRadius: 2 },
-        { label: 'TGN+FixedEnc (explore)', data: [0.731, 0.722, 0.721, 0.720, 0.720], borderColor: C_TGNFE, backgroundColor: 'transparent', borderWidth: 1.5, borderDash: [2,3], pointRadius: 2 },
-        { label: 'TGN (explore)',           data: [0.728, 0.716, 0.710, 0.709, 0.708], borderColor: C_TGN,   backgroundColor: 'transparent', borderWidth: 1.5, borderDash: [2,3], pointRadius: 2 },
-        { label: 'TGAT (explore)',          data: [0.728, 0.718, 0.713, 0.712, 0.711], borderColor: C_TGAT,  backgroundColor: 'transparent', borderWidth: 1.5, borderDash: [2,3], pointRadius: 2 }
+        { label: 'GraphMixer (explore)',     data: [0.810, 0.799, 0.791, 0.789, 0.787], borderColor: C_GM,     backgroundColor: 'transparent', borderWidth: 1.5, borderDash: [2,3], pointRadius: 2 },
+        { label: 'TGN+FixedEnc (explore)',  data: [0.731, 0.722, 0.721, 0.720, 0.720], borderColor: C_TGNFE,  backgroundColor: 'transparent', borderWidth: 1.5, borderDash: [2,3], pointRadius: 2 },
+        { label: 'TGN (explore)',            data: [0.728, 0.716, 0.710, 0.709, 0.708], borderColor: C_TGN,    backgroundColor: 'transparent', borderWidth: 1.5, borderDash: [2,3], pointRadius: 2 },
+        { label: 'TGAT+FixedEnc (explore)', data: [0.727, 0.716, 0.712, 0.711, 0.710], borderColor: C_TGATFE, backgroundColor: 'transparent', borderWidth: 1.5, borderDash: [2,3], pointRadius: 2 },
+        { label: 'TGAT (explore)',           data: [0.728, 0.718, 0.713, 0.712, 0.711], borderColor: C_TGAT,   backgroundColor: 'transparent', borderWidth: 1.5, borderDash: [2,3], pointRadius: 2 }
       ]
     },
     options: {

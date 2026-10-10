@@ -12,8 +12,11 @@ set -euo pipefail
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_DIR"
 
-DATASETS_DIR="$REPO_DIR/data/datasets"
+# Match the DATA_DIR convention used by the SLURM scripts
+DATA_DIR="${DATA_DIR:-$HOME/dyngrapheval-data}"
+DATASETS_DIR="$DATA_DIR/datasets"
 mkdir -p "$DATASETS_DIR"
+echo "[prefetch] DATA_DIR=$DATA_DIR"
 
 PYTHON="${REPO_DIR}/.venv/bin/python"
 if [[ ! -x "$PYTHON" ]]; then

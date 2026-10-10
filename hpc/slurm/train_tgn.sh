@@ -7,28 +7,14 @@
 #SBATCH --time=24:00:00
 #SBATCH --output=%x_%j.out
 #SBATCH --error=%x_%j.out
-# Usage: sbatch hpc/slurm/train_tgn.sh [--dataset tgbl-wiki] [--seed 0]
-#        Override defaults via env vars: DATASET, SEED, EPOCHS, PATIENCE
-
+#
+# Submit:
+#   sbatch hpc/slurm/train_tgn.sh
+#   DATA_DIR=/work/$USER/dge DATASET=tgbl-review SEED=1 sbatch hpc/slurm/train_tgn.sh
 set -euo pipefail
+source "$(dirname "${BASH_SOURCE[0]}")/_common.sh"
 
-REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-PYTHON="$REPO_DIR/.venv/bin/python"
+hpc_train tgn
+hpc_eval  tgn
 
-DATASET="${DATASET:-tgbl-wiki}"
-SEED="${SEED:-0}"
-EPOCHS="${EPOCHS:-50}"
-PATIENCE="${PATIENCE:-5}"
-
-echo "[slurm] Job $SLURM_JOB_ID on $(hostname)"
-echo "[slurm] TGN | dataset=$DATASET seed=$SEED epochs=$EPOCHS"
-
-"$PYTHON" "$REPO_DIR/models/tgn/train.py" \
-    --dataset       "$DATASET" \
-    --seed          "$SEED" \
-    --epochs        "$EPOCHS" \
-    --patience      "$PATIENCE" \
-    --datasets_cache "$REPO_DIR/data/datasets" \
-    --checkpoints_dir "$REPO_DIR/data/checkpoints/tgn"
-
-echo "[slurm] Done."
+echo "[done] TGN train+eval complete."

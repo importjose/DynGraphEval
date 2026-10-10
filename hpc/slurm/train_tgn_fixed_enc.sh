@@ -7,6 +7,7 @@
 #SBATCH --time=24:00:00
 #SBATCH --output=%x_%j.out
 #SBATCH --error=%x_%j.out
+#SBATCH --export=ALL
 #
 # Submit:
 #   sbatch hpc/slurm/train_tgn_fixed_enc.sh

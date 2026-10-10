@@ -40,7 +40,12 @@ hpc-prefetch:
 # Usage: make hpc-train MODEL=tgn
 #        make hpc-train MODEL=tgn DATASET=tgbl-review SEED=1
 hpc-train:
-	ssh $(HPC_HOST) "cd $(HPC_DIR) && DATA_DIR=$(HPC_DATA_DIR) DATASET=$(DATASET) SEED=$(SEED) sbatch hpc/slurm/train_$(MODEL).sh"
+	@test -n "$(MODEL)" || (echo "ERROR: MODEL is required. Usage: make hpc-train MODEL=tgn"; exit 1)
+	ssh $(HPC_HOST) "cd $(HPC_DIR) && \
+	    DATA_DIR=$(HPC_DATA_DIR) \
+	    $(if $(DATASET),DATASET=$(DATASET),) \
+	    $(if $(SEED),SEED=$(SEED),) \
+	    sbatch hpc/slurm/train_$(MODEL).sh"
 
 # Check status of your HPC jobs
 hpc-status:

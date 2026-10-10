@@ -45,8 +45,12 @@ def parse_args():
                    help="Skip Standard MRR (reuse --standard_mrr value)")
     p.add_argument("--standard_mrr",   type=float, default=None,
                    help="Pre-computed Standard MRR (used with --skip_standard)")
-    p.add_argument("--datasets_dir",   default=None,
+    p.add_argument("--datasets_dir",    default=None,
                    help="TGB datasets directory. Default: data/datasets relative to repo root")
+    p.add_argument("--checkpoints_dir", default=None,
+                   help="Root checkpoints directory. Checkpoint resolved as "
+                        "{checkpoints_dir}/{model}/{dataset}/run{seed}.pkl. "
+                        "Default: data/checkpoints relative to repo root")
     p.add_argument("--results_dir",    default=None,
                    help="Output directory for JSON results. Default: results/ in repo root")
     return p.parse_args()
@@ -55,20 +59,23 @@ def parse_args():
 def main():
     args = parse_args()
 
-    datasets_dir = args.datasets_dir or os.path.join(REPO_DIR, "data", "datasets")
-    results_dir  = args.results_dir  or os.path.join(REPO_DIR, "results")
+    datasets_dir    = args.datasets_dir    or os.path.join(REPO_DIR, "data", "datasets")
+    checkpoints_dir = args.checkpoints_dir or os.path.join(REPO_DIR, "data", "checkpoints")
+    results_dir     = args.results_dir     or os.path.join(REPO_DIR, "results")
     os.makedirs(results_dir, exist_ok=True)
 
     # ── Resolve checkpoint ─────────────────────────────────────────────────────
     checkpoint = args.checkpoint
     if checkpoint is None and args.model != "edgebank":
         checkpoint = os.path.join(
-            REPO_DIR, "data", "checkpoints",
-            args.model, args.dataset, f"run{args.seed}.pkl",
+            checkpoints_dir, args.model, args.dataset, f"run{args.seed}.pkl",
         )
         _log(f"Checkpoint: {checkpoint}")
         if not os.path.exists(checkpoint):
             _log(f"ERROR: checkpoint not found at {checkpoint}")
+            _log(f"  Expected: {checkpoint}")
+            _log(f"  Available in {os.path.dirname(checkpoint)}: "
+                 f"{os.listdir(os.path.dirname(checkpoint)) if os.path.isdir(os.path.dirname(checkpoint)) else 'directory does not exist'}")
             sys.exit(1)
 
     import torch

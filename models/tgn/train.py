@@ -48,8 +48,8 @@ def parse_args():
     p.add_argument("--gpu",            type=int,   default=None,
                    help="GPU index to use (default: 0 if CUDA available, else CPU)")
     p.add_argument("--seed",           type=int,   default=0)
-    p.add_argument("--repo_dir",       default="/tmp/TGB_TPNet",
-                   help="Where to clone the TPNet repo")
+    p.add_argument("--repo_dir",       default=None,
+                   help="Path to vendored TGB_TPNet repo (default: src/TGB_TPNet)")
     p.add_argument("--datasets_cache", default=None,
                    help="Persistent directory for TGB datasets (symlinked into repo). "
                         "Set to a Drive path or Modal Volume path to avoid re-downloading.")
@@ -107,16 +107,10 @@ def main():
     os.makedirs(ckpt_dir, exist_ok=True)
     _log(f"Checkpoint dir: {ckpt_dir}")
 
-    # ── Clone / update TPNet repo ─────────────────────────────────────────────
-    repo_url = "https://github.com/lxd99/TGB_TPNet.git"
-    if os.path.exists(args.repo_dir):
-        _log(f"Updating TPNet repo at {args.repo_dir}...")
-        run(f"git -C {args.repo_dir} pull --quiet")
-        _log("Repo up to date.")
-    else:
-        _log(f"Cloning TPNet repo to {args.repo_dir}...")
-        run(f"git clone --quiet {repo_url} {args.repo_dir}")
-        _log("Clone complete.")
+    if args.repo_dir is None:
+        root_dir      = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        args.repo_dir = os.path.join(root_dir, "src", "TGB_TPNet")
+    _log(f"TPNet repo dir: {args.repo_dir}")
 
     # ── Create required directories inside the repo ───────────────────────────
     for d in ["logs", "saved_models", "saved_results"]:

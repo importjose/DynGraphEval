@@ -44,7 +44,7 @@ def parse_args():
     p.add_argument("--lr",             type=float, default=0.0001)
     p.add_argument("--gpu",            type=int,   default=None)
     p.add_argument("--seed",           type=int,   default=0)
-    p.add_argument("--repo_dir",       default="/tmp/TGB_TPNet")
+    p.add_argument("--repo_dir",       default=None)
     p.add_argument("--datasets_cache", default=None)
     p.add_argument("--checkpoints_dir", default=None)
     return p.parse_args()
@@ -83,15 +83,10 @@ def main():
     os.makedirs(ckpt_dir, exist_ok=True)
     _log(f"Checkpoint dir: {ckpt_dir}")
 
-    # ── Clone / update TPNet repo ─────────────────────────────────────────────
-    repo_url = "https://github.com/lxd99/TGB_TPNet.git"
-    if os.path.exists(args.repo_dir):
-        _log(f"Updating TPNet repo at {args.repo_dir}...")
-        run(f"git -C {args.repo_dir} pull --quiet")
-    else:
-        _log(f"Cloning TPNet repo to {args.repo_dir}...")
-        run(f"git clone --quiet {repo_url} {args.repo_dir}")
-    _log("Repo ready.")
+    if args.repo_dir is None:
+        root_dir      = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        args.repo_dir = os.path.join(root_dir, "src", "TGB_TPNet")
+    _log(f"TPNet repo dir: {args.repo_dir}")
 
     for d in ["logs", "saved_models", "saved_results"]:
         os.makedirs(os.path.join(args.repo_dir, d), exist_ok=True)

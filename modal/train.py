@@ -135,7 +135,6 @@ class TrainJob:
             "--num_neighbors", str(num_neighbors),
             "--dropout",       str(dropout),
             "--lr",            str(lr),
-            "--repo_dir",        "/tmp/TGB_TPNet",
             "--datasets_cache",  DATASETS_DIR,
             "--checkpoints_dir", os.path.join(CHECKPOINTS_DIR, model),
         ]

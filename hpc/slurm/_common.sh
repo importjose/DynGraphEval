@@ -30,8 +30,9 @@ DATA_DIR="${DATA_DIR:-$HOME/dyngrapheval-data}"
 DATASETS_DIR="$DATA_DIR/datasets"
 CHECKPOINTS_DIR="$DATA_DIR/checkpoints"
 RESULTS_DIR="$DATA_DIR/results"
+OUTPUTS_DIR="$REPO_DIR/outputs"
 
-mkdir -p "$DATASETS_DIR" "$CHECKPOINTS_DIR" "$RESULTS_DIR"
+mkdir -p "$DATASETS_DIR" "$CHECKPOINTS_DIR" "$RESULTS_DIR" "$OUTPUTS_DIR"
 
 # Per-run defaults (override via env vars at submission time)
 DATASET="${DATASET:-tgbl-wiki}"
@@ -69,6 +70,15 @@ _cleanup_job_repo() {
 hpc_train() {
     local MODEL="$1"; shift          # e.g. "tgn"
     local EXTRA_ARGS=("$@")          # any extra args forwarded to train.py
+
+    # ── Named log file ────────────────────────────────────────────────────────
+    # #SBATCH --output writes to outputs/%x_%j.out (model name + job ID).
+    # Tee to a second file with full context in the name.
+    local TIMESTAMP
+    TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
+    local LOG_FILE="$OUTPUTS_DIR/${MODEL}_seed${SEED}_${DATASET}_${TIMESTAMP}_${JOB_ID}.log"
+    exec > >(tee -a "$LOG_FILE") 2>&1
+    echo "[log] $LOG_FILE"
 
     _setup_job_repo
 

@@ -122,7 +122,7 @@ def main():
     train_cmd = (
         f"cd {args.repo_dir} && "
         f"PYTHONPATH={args.repo_dir} PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True "
-        f"{sys.executable} train_link_prediction.py "
+        f"{sys.executable} _launch.py "
         f"  --model_name TPNet "
         f"  --dataset_name {args.dataset} "
         f"  --num_runs 1 "

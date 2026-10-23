@@ -153,7 +153,7 @@ def main():
          f"batch={args.batch_size}")
     train_cmd = (
         f"cd {args.repo_dir} && "
-        f"PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True "
+        f"PYTHONPATH={args.repo_dir} PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True "
         f"{sys.executable} train_link_prediction.py "
         f"  --model_name TGN "
         f"  --dataset_name {args.dataset} "

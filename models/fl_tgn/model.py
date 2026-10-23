@@ -118,7 +118,7 @@ class _TGNClient:
             - {'memory_params': state_dict, 'gnn': ..., 'link_pred': ...}
               (federated format: only learnable params, no memory buffers)
         """
-        ckpt = torch.load(path, map_location=self.device)
+        ckpt = torch.load(path, map_location=self.device, weights_only=False)
 
         if "memory" in ckpt:
             self.memory.load_state_dict(ckpt["memory"])

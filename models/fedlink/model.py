@@ -133,7 +133,7 @@ class FedLink(BaseModel):
         """Load one state_dict per client."""
         paths = path if path is not None else self.ckpt_paths
         for c, model in enumerate(self.models):
-            sd = torch.load(paths[c], map_location=self.device)
+            sd = torch.load(paths[c], map_location=self.device, weights_only=False)
             model.load_state_dict(sd)
 
     def warmup(self, train_data=None, val_data=None) -> None:

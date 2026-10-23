@@ -143,7 +143,7 @@ class TPNetTGN(BaseModel):
         Keys: '0.*' for MemoryModel, '1.*' for LinkPredictor.
         """
         path = path or self.ckpt_path
-        ckpt = torch.load(path, map_location=self.device)
+        ckpt = torch.load(path, map_location=self.device, weights_only=False)
 
         # TPNet saves {'model': state_dict, 'args': ..., 'message': ...}
         state_dict = ckpt['model'] if isinstance(ckpt, dict) and 'model' in ckpt else ckpt

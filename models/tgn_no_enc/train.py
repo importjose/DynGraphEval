@@ -63,6 +63,7 @@ def _apply_patches(repo_dir: str) -> None:
     patch_map = {
         "train_link_prediction.py": "train_link_prediction.py",
         "evaluate_models_utils.py": os.path.join("utils", "evaluate_models_utils.py"),
+        "EarlyStopping.py": os.path.join("utils", "EarlyStopping.py"),
     }
     for src_name, dst_rel in patch_map.items():
         src = os.path.join(patches_dir, src_name)

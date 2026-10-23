@@ -110,7 +110,7 @@ def _find_latest_resume_checkpoint(saved_models_dir: str, prefix: str):
 
 def _load_resume_checkpoint(path, model, optimizer, early_stopping, model_name, device):
     """Load resume checkpoint and restore model/optimizer/memory/early-stopping state."""
-    payload = torch.load(path, map_location=device)
+    payload = torch.load(path, map_location=device, weights_only=False)
     model.load_state_dict(payload['model'])
     optimizer.load_state_dict(payload['optimizer'])
     es = payload['early_stopping']

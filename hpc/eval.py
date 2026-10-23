@@ -31,8 +31,8 @@ def _log(msg: str) -> None:
 def parse_args():
     p = argparse.ArgumentParser(description="DynGraphEval — HPC evaluation")
     p.add_argument("--model",          default="tgn",
-                   choices=["tgn", "tgn_fixed_enc", "tgat", "tgat_fixed_enc",
-                             "graphmixer", "tpnet", "edgebank"],
+                   choices=["tgn", "tgn_fixed_enc", "tgn_no_enc", "tgat",
+                            "tgat_fixed_enc", "graphmixer", "tpnet", "edgebank"],
                    help="Model to evaluate")
     p.add_argument("--checkpoint",     default=None,
                    help="Explicit path to .pkl checkpoint. "
@@ -103,7 +103,7 @@ def main():
     from models.edgebank.model   import EdgeBankModel
 
     _log(f"Loading model {args.model}...")
-    if args.model in ("tgn", "tgn_fixed_enc"):
+    if args.model in ("tgn", "tgn_fixed_enc", "tgn_no_enc"):
         m = TPNetTGN(checkpoint=checkpoint, num_nodes=num_nodes, device=device)
     elif args.model in ("tgat", "tgat_fixed_enc"):
         m = TGATModel(checkpoint=checkpoint, num_nodes=num_nodes, device=device)

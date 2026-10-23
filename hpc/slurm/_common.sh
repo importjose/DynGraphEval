@@ -30,9 +30,10 @@ DATA_DIR="${DATA_DIR:-$HOME/dyngrapheval-data}"
 DATASETS_DIR="$DATA_DIR/datasets"
 CHECKPOINTS_DIR="$DATA_DIR/checkpoints"
 RESULTS_DIR="$DATA_DIR/results"
+NEG_CACHE_DIR="$DATA_DIR/neg_cache"
 OUTPUTS_DIR="$REPO_DIR/outputs"
 
-mkdir -p "$DATASETS_DIR" "$CHECKPOINTS_DIR" "$RESULTS_DIR" "$OUTPUTS_DIR"
+mkdir -p "$DATASETS_DIR" "$CHECKPOINTS_DIR" "$RESULTS_DIR" "$NEG_CACHE_DIR" "$OUTPUTS_DIR"
 
 # Per-run defaults (override via env vars at submission time)
 DATASET="${DATASET:-tgbl-wiki}"
@@ -113,7 +114,8 @@ hpc_eval() {
         --seed             "$SEED" \
         --datasets_dir     "$DATASETS_DIR" \
         --checkpoints_dir  "$CHECKPOINTS_DIR" \
-        --results_dir      "$RESULTS_DIR"
+        --results_dir      "$RESULTS_DIR" \
+        --neg_cache_dir    "$NEG_CACHE_DIR"
 
     _cleanup_job_repo
 }

@@ -36,7 +36,7 @@ def parse_args():
                    help="Model to evaluate")
     p.add_argument("--checkpoint",     default=None,
                    help="Explicit path to .pkl checkpoint. "
-                        "Defaults to data/checkpoints/{model}/{dataset}/run{seed}.pkl")
+                        "Defaults to {checkpoints_dir}/{model}/{dataset}/run{seed}.pkl")
     p.add_argument("--dataset",        default="tgbl-wiki")
     p.add_argument("--seed",           type=int, default=0)
     p.add_argument("--num_neg",        type=int, default=999,
@@ -53,6 +53,8 @@ def parse_args():
                         "Default: data/checkpoints relative to repo root")
     p.add_argument("--results_dir",    default=None,
                    help="Output directory for JSON results. Default: results/ in repo root")
+    p.add_argument("--neg_cache_dir",  default=None,
+                   help="Directory to cache recency negatives. Default: neg_cache/ in DATA_DIR")
     return p.parse_args()
 
 
@@ -62,7 +64,9 @@ def main():
     datasets_dir    = args.datasets_dir    or os.path.join(REPO_DIR, "data", "datasets")
     checkpoints_dir = args.checkpoints_dir or os.path.join(REPO_DIR, "data", "checkpoints")
     results_dir     = args.results_dir     or os.path.join(REPO_DIR, "results")
+    neg_cache_dir   = args.neg_cache_dir   or os.path.join(REPO_DIR, "neg_cache")
     os.makedirs(results_dir, exist_ok=True)
+    os.makedirs(neg_cache_dir, exist_ok=True)
 
     # ── Resolve checkpoint ─────────────────────────────────────────────────────
     checkpoint = args.checkpoint
@@ -72,10 +76,10 @@ def main():
         )
         _log(f"Checkpoint: {checkpoint}")
         if not os.path.exists(checkpoint):
+            ckpt_dir = os.path.dirname(checkpoint)
+            available = os.listdir(ckpt_dir) if os.path.isdir(ckpt_dir) else "directory does not exist"
             _log(f"ERROR: checkpoint not found at {checkpoint}")
-            _log(f"  Expected: {checkpoint}")
-            _log(f"  Available in {os.path.dirname(checkpoint)}: "
-                 f"{os.listdir(os.path.dirname(checkpoint)) if os.path.isdir(os.path.dirname(checkpoint)) else 'directory does not exist'}")
+            _log(f"  Available in {ckpt_dir}: {available}")
             sys.exit(1)
 
     import torch
@@ -91,9 +95,8 @@ def main():
     val_data   = data[dataset_obj.val_mask]
     test_data  = data[dataset_obj.test_mask]
     num_nodes  = int(max(data.src.max(), data.dst.max())) + 1
-    min_dst    = int(data.dst.min())
-    max_dst    = int(data.dst.max())
-    _log(f"Dataset loaded: {len(data)} edges, {num_nodes} nodes")
+    msg_dim    = data.msg.shape[1]
+    _log(f"Dataset loaded: {len(data)} edges, {num_nodes} nodes, msg_dim={msg_dim}")
 
     # ── Instantiate model ──────────────────────────────────────────────────────
     from models.tgn.model        import TPNetTGN
@@ -104,15 +107,52 @@ def main():
 
     _log(f"Loading model {args.model}...")
     if args.model in ("tgn", "tgn_fixed_enc", "tgn_no_enc"):
-        m = TPNetTGN(checkpoint=checkpoint, num_nodes=num_nodes, device=device)
+        m = TPNetTGN(
+            checkpoint_path=checkpoint,
+            num_nodes=num_nodes,
+            msg_dim=msg_dim,
+            train_data=train_data,
+            val_data=val_data,
+            test_data=test_data,
+            device=device,
+        )
+        m.load_checkpoint()
     elif args.model in ("tgat", "tgat_fixed_enc"):
-        m = TGATModel(checkpoint=checkpoint, num_nodes=num_nodes, device=device)
+        m = TGATModel(
+            checkpoint_path=checkpoint,
+            num_nodes=num_nodes,
+            msg_dim=msg_dim,
+            train_data=train_data,
+            val_data=val_data,
+            test_data=test_data,
+            device=device,
+        )
+        m.load_checkpoint()
     elif args.model == "graphmixer":
-        m = GraphMixerModel(checkpoint=checkpoint, num_nodes=num_nodes, device=device)
+        m = GraphMixerModel(
+            checkpoint_path=checkpoint,
+            num_nodes=num_nodes,
+            msg_dim=msg_dim,
+            train_data=train_data,
+            val_data=val_data,
+            test_data=test_data,
+            device=device,
+        )
+        m.load_checkpoint()
     elif args.model == "tpnet":
-        m = TPNetModel(checkpoint=checkpoint, num_nodes=num_nodes, device=device)
+        m = TPNetModel(
+            checkpoint_path=checkpoint,
+            num_nodes=num_nodes,
+            msg_dim=msg_dim,
+            train_data=train_data,
+            val_data=val_data,
+            test_data=test_data,
+            device=device,
+        )
+        m.load_checkpoint()
     elif args.model == "edgebank":
-        m = EdgeBankModel(num_nodes=num_nodes, device=device)
+        m = EdgeBankModel()
+        m.load_checkpoint()
     else:
         _log(f"Unknown model: {args.model}")
         sys.exit(1)
@@ -120,19 +160,19 @@ def main():
     # ── Run evaluation ─────────────────────────────────────────────────────────
     from evaluate.evaluator import Evaluator
     ev = Evaluator(
-        model=m,
+        dataset=dataset_obj,
         train_data=train_data,
         val_data=val_data,
         test_data=test_data,
-        num_nodes=num_nodes,
-        min_dst=min_dst,
-        max_dst=max_dst,
+        dataset_name=args.dataset,
+        neg_cache_dir=neg_cache_dir,
         num_neg=args.num_neg,
-        neg_seed=args.seed,
-        dataset_obj=dataset_obj,
+        seed=args.seed,
     )
 
     results = ev.run(
+        model=m,
+        model_name=args.model,
         skip_standard=args.skip_standard,
         standard_mrr=args.standard_mrr,
     )
@@ -141,7 +181,7 @@ def main():
     results["seed"]    = args.seed
 
     # ── Save results ───────────────────────────────────────────────────────────
-    ts   = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    ts    = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     fname = f"{args.model}_{args.dataset}_{ts}.json"
     out   = os.path.join(results_dir, fname)
     with open(out, "w") as f:

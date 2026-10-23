@@ -35,8 +35,15 @@ uv pip install \
     --index-url https://download.pytorch.org/whl/cu121
 
 # ── 4. Install remaining project dependencies ─────────────────────────────────
+# Install via -e . to pull in all deps from pyproject.toml, then immediately
+# uninstall the package itself. The editable install registers a MetaPathFinder
+# hook for DynGraphEval's models/ package, which shadows TGB_TPNet's models/
+# directory even when PYTHONPATH is set. Uninstalling removes the hook while
+# keeping all transitive dependencies (torch, py-tgb, etc.) in place.
 echo "[setup] Installing project dependencies..."
 uv pip install -e ".[dev]" 2>/dev/null || uv pip install -e .
+echo "[setup] Unregistering DynGraphEval package (prevents models/ import conflict)..."
+uv pip uninstall -y dyngrapheval
 
 # ── 5. Install extra TGB_TPNet dependencies ───────────────────────────────────
 echo "[setup] Installing TGB_TPNet dependencies..."

@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 #SBATCH --job-name=dge-tgat-fe
-#SBATCH --partition=longq7-eng
+#SBATCH --partition=shortq7
 #SBATCH --gres=gpu:a100:1
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=32G
-#SBATCH --time=12:00:00
+#SBATCH --time=5:45:00
 #SBATCH --output=outputs/%x_%j.out
 #SBATCH --error=outputs/%x_%j.out
 #SBATCH --export=ALL

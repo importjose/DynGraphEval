@@ -32,7 +32,7 @@ def parse_args():
     p = argparse.ArgumentParser(description="DynGraphEval — HPC evaluation")
     p.add_argument("--model",          default="tgn",
                    choices=["tgn", "tgn_fixed_enc", "tgn_no_enc", "tgat",
-                            "tgat_fixed_enc", "graphmixer", "tpnet", "edgebank"],
+                            "tgat_fixed_enc", "tgat_no_enc", "graphmixer", "tpnet", "edgebank"],
                    help="Model to evaluate")
     p.add_argument("--checkpoint",     default=None,
                    help="Explicit path to .pkl checkpoint. "
@@ -117,7 +117,7 @@ def main():
             device=device,
         )
         m.load_checkpoint()
-    elif args.model in ("tgat", "tgat_fixed_enc"):
+    elif args.model in ("tgat", "tgat_fixed_enc", "tgat_no_enc"):
         m = TGATModel(
             checkpoint_path=checkpoint,
             num_nodes=num_nodes,

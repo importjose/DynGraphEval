@@ -139,7 +139,7 @@ class TrainJob:
             "--checkpoints_dir", os.path.join(CHECKPOINTS_DIR, model),
         ]
         # TGN, TGAT, and their fixed-enc variants use num_heads; GraphMixer does not
-        if model in ("tgn", "tgat", "tgn_fixed_enc", "tgat_fixed_enc", "tgn_no_enc"):
+        if model in ("tgn", "tgat", "tgn_fixed_enc", "tgat_fixed_enc", "tgn_no_enc", "tgat_no_enc"):
             cmd += ["--num_heads", str(num_heads)]
         env = os.environ.copy()
         env["PYTHONUNBUFFERED"] = "1"

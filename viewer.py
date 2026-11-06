@@ -32,7 +32,8 @@ K_LABELS = [f"K={k}" for k in K_VALS]
 # Display order and colors per model.
 # EdgeBank is shown last as the memorization floor reference.
 MODEL_META = {
-    "graphmixer":    {"label": "GraphMixer",     "color": "#16a34a"},
+    "graphmixer":            {"label": "GraphMixer",     "color": "#16a34a"},
+    "graphmixer_multiscale": {"label": "GraphMixer-MS",  "color": "#15803d"},
     "tgn":           {"label": "TGN",            "color": "#3b82f6"},
     "tgn_fixed_enc": {"label": "TGN+FixedEnc",   "color": "#9333ea"},
     "tgn_no_enc":    {"label": "TGN+NoEnc",      "color": "#93c5fd"},

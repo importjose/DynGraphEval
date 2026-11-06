@@ -145,6 +145,9 @@ class TrainJob:
         env["PYTHONUNBUFFERED"] = "1"
         env["MLFLOW_TRACKING_URI"]    = f"sqlite:////{VOLUME_PATH}/mlflow.db"
         env["MLFLOW_EXPERIMENT_NAME"] = "dyngrapheval-training"
+        # MultiScaleGraphMixer patches GraphMixer in TGB_TPNet via env var
+        if model == "graphmixer_multiscale":
+            env["MULTISCALE_GRAPHMIXER"] = "1"
 
         try:
             proc = subprocess.Popen(

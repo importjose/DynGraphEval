@@ -32,7 +32,8 @@ def parse_args():
     p = argparse.ArgumentParser(description="DynGraphEval — HPC evaluation")
     p.add_argument("--model",          default="tgn",
                    choices=["tgn", "tgn_fixed_enc", "tgn_no_enc", "tgat",
-                            "tgat_fixed_enc", "tgat_no_enc", "graphmixer", "tpnet", "edgebank"],
+                            "tgat_fixed_enc", "tgat_no_enc", "graphmixer", "graphmixer_multiscale",
+                            "tpnet", "edgebank"],
                    help="Model to evaluate")
     p.add_argument("--checkpoint",     default=None,
                    help="Explicit path to .pkl checkpoint. "
@@ -99,11 +100,12 @@ def main():
     _log(f"Dataset loaded: {len(data)} edges, {num_nodes} nodes, msg_dim={msg_dim}")
 
     # ── Instantiate model ──────────────────────────────────────────────────────
-    from models.tgn.model        import TPNetTGN
-    from models.graphmixer.model import GraphMixerModel
-    from models.tgat.model       import TGATModel
-    from models.tpnet.model      import TPNetModel
-    from models.edgebank.model   import EdgeBankModel
+    from models.tgn.model                       import TPNetTGN
+    from models.graphmixer.model                import GraphMixerModel
+    from models.graphmixer_multiscale.model     import MultiScaleGraphMixerModel
+    from models.tgat.model                      import TGATModel
+    from models.tpnet.model                     import TPNetModel
+    from models.edgebank.model                  import EdgeBankModel
 
     _log(f"Loading model {args.model}...")
     if args.model in ("tgn", "tgn_fixed_enc", "tgn_no_enc"):
@@ -130,6 +132,17 @@ def main():
         m.load_checkpoint()
     elif args.model == "graphmixer":
         m = GraphMixerModel(
+            checkpoint_path=checkpoint,
+            num_nodes=num_nodes,
+            msg_dim=msg_dim,
+            train_data=train_data,
+            val_data=val_data,
+            test_data=test_data,
+            device=device,
+        )
+        m.load_checkpoint()
+    elif args.model == "graphmixer_multiscale":
+        m = MultiScaleGraphMixerModel(
             checkpoint_path=checkpoint,
             num_nodes=num_nodes,
             msg_dim=msg_dim,

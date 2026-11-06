@@ -32,15 +32,17 @@ K_LABELS = [f"K={k}" for k in K_VALS]
 # Display order and colors per model.
 # EdgeBank is shown last as the memorization floor reference.
 MODEL_META = {
-    "graphmixer":    {"label": "GraphMixer",    "color": "#16a34a"},
-    "tgn":           {"label": "TGN",           "color": "#3b82f6"},
-    "tgn_fixed_enc": {"label": "TGN+FixedEnc",  "color": "#9333ea"},
-    "tgat":          {"label": "TGAT",          "color": "#ea580c"},
-    "tgat_fixed_enc":{"label": "TGAT+FixedEnc", "color": "#f59e0b"},
-    "tpnet":         {"label": "TPNet",         "color": "#7c3aed"},
-    "fl_tgn":        {"label": "FL-TGN",        "color": "#0891b2"},
-    "fedlink":       {"label": "FedLink",       "color": "#be185d"},
-    "edgebank":      {"label": "EdgeBank",      "color": "#6b7280"},
+    "graphmixer":    {"label": "GraphMixer",     "color": "#16a34a"},
+    "tgn":           {"label": "TGN",            "color": "#3b82f6"},
+    "tgn_fixed_enc": {"label": "TGN+FixedEnc",   "color": "#9333ea"},
+    "tgn_no_enc":    {"label": "TGN+NoEnc",      "color": "#93c5fd"},
+    "tgat":          {"label": "TGAT",           "color": "#ea580c"},
+    "tgat_fixed_enc":{"label": "TGAT+FixedEnc",  "color": "#f59e0b"},
+    "tgat_no_enc":   {"label": "TGAT+NoEnc",     "color": "#fdba74"},
+    "tpnet":         {"label": "TPNet",          "color": "#7c3aed"},
+    "fl_tgn":        {"label": "FL-TGN",         "color": "#0891b2"},
+    "fedlink":       {"label": "FedLink",        "color": "#be185d"},
+    "edgebank":      {"label": "EdgeBank",       "color": "#6b7280"},
 }
 
 def model_label(m: str) -> str:
@@ -314,6 +316,39 @@ with tab_overview:
         pd.DataFrame(rows).set_index("Model"),
         use_container_width=True,
     )
+
+    # ── Key Findings ──────────────────────────────────────────────────────
+    st.divider()
+    st.subheader("Key Findings")
+    st.markdown("""
+**1. The time encoder is not the source of recency bias.**
+Across all TGAT variants (no memory bank), freezing or zeroing the time encoder barely
+moves the Return/Explore gap (0.086 → 0.090 → 0.092). The same holds for TGN: the gap
+is constant at ~0.114 regardless of what is done to the time encoder.
+
+**2. The memory bank drives the Return/Explore gap.**
+Models with an explicit node memory (TGN family) show a gap of ~0.114. Models without
+one (TGAT family, GraphMixer) show 0.048–0.092. The gap is proportional to memory
+strength, not temporal encoding.
+
+**3. Zeroing TGAT's time encoder has almost no effect.**
+Standard MRR drops by only 0.008 and Recency MRR is unchanged (0.773 → 0.773).
+TGAT's graph attention over neighbors carries nearly all the predictive signal —
+the time encoder contributes almost nothing.
+
+**4. TGN+FixedEnc outperforms TGN on both metrics** (Standard MRR: 0.692 vs 0.601,
+Recency MRR: 0.804 vs 0.789). The fixed geometric initialization of the time encoder
+is a better prior than what gradient descent finds.
+
+**5. GraphMixer is the least biased model.** It achieves the highest Recency MRR (0.821)
+with the smallest Return/Explore gap (0.048), suggesting temporal graph learning without
+explicit memory is both possible and less reliant on structural memorization.
+
+**6. Standard MRR is a flawed benchmark.** EdgeBank — a parameter-free lookup table —
+scores 0.495, competitive with neural models. Recency MRR exposes it at 0.362, the
+worst of all models, because it cannot distinguish true positives from recently-visited
+negatives that it has also memorized.
+    """)
 
     st.divider()
 

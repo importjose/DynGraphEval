@@ -4,7 +4,7 @@
 #SBATCH --gres=gpu:a100:1
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=32G
-#SBATCH --time=4:00:00
+#SBATCH --time=24:00:00
 #SBATCH --output=outputs/%x_%j.out
 #SBATCH --error=outputs/%x_%j.out
 #SBATCH --export=ALL

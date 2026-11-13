@@ -31,8 +31,13 @@ def _log(msg: str) -> None:
 def parse_args():
     p = argparse.ArgumentParser(description="DynGraphEval — HPC evaluation")
     p.add_argument("--model",          default="tgn",
-                   choices=["tgn", "tgn_fixed_enc", "tgn_no_enc", "tgat",
-                            "tgat_fixed_enc", "tgat_no_enc", "graphmixer", "graphmixer_multiscale",
+                   choices=["tgn", "tgn_fixed_enc", "tgn_no_enc",
+                            "tgn_time_hour", "tgn_time_day", "tgn_time_week", "tgn_time_month",
+                            "tgat", "tgat_fixed_enc", "tgat_no_enc",
+                            "tgat_time_day", "tgat_time_week",
+                            "graphmixer", "graphmixer_multiscale",
+                            "graphmixer_time_hour", "graphmixer_time_day",
+                            "graphmixer_time_week", "graphmixer_time_month",
                             "tpnet", "edgebank"],
                    help="Model to evaluate")
     p.add_argument("--checkpoint",     default=None,
@@ -87,6 +92,28 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     _log(f"Device: {device}")
 
+    # ── Time-scale patch for temporal granularity ablations ───────────────────────
+    _TIME_GRAN_SCALES = {
+        "hour":  1.0 / 3600,
+        "day":   1.0 / 86400,
+        "week":  1.0 / 604800,
+        "month": 1.0 / 2592000,
+    }
+
+    def _apply_time_scale_patch(model_name: str) -> None:
+        """Monkey-patch TimeEncoder.forward to scale input timestamps if needed."""
+        for gran, scale in _TIME_GRAN_SCALES.items():
+            if model_name.endswith(f"_time_{gran}"):
+                from models.tgn.tpnet_components import TimeEncoder
+                _orig = TimeEncoder.forward
+                def _scaled(self, timestamps, _s=scale, _o=_orig):
+                    return _o(self, timestamps * _s)
+                TimeEncoder.forward = _scaled
+                _log(f"[time-scale] TimeEncoder input ×{scale:.2e} ({gran}-resolution)")
+                return
+
+    _apply_time_scale_patch(args.model)
+
     # ── Load dataset ───────────────────────────────────────────────────────────
     _log(f"Loading dataset {args.dataset}...")
     from tgb.linkproppred.dataset_pyg import PyGLinkPropPredDataset
@@ -108,7 +135,7 @@ def main():
     from models.edgebank.model                  import EdgeBankModel
 
     _log(f"Loading model {args.model}...")
-    if args.model in ("tgn", "tgn_fixed_enc", "tgn_no_enc"):
+    if args.model in ("tgn", "tgn_fixed_enc", "tgn_no_enc") or args.model.startswith("tgn_time_"):
         m = TPNetTGN(
             checkpoint_path=checkpoint,
             num_nodes=num_nodes,
@@ -119,7 +146,7 @@ def main():
             device=device,
         )
         m.load_checkpoint()
-    elif args.model in ("tgat", "tgat_fixed_enc", "tgat_no_enc"):
+    elif args.model in ("tgat", "tgat_fixed_enc", "tgat_no_enc") or args.model.startswith("tgat_time_"):
         m = TGATModel(
             checkpoint_path=checkpoint,
             num_nodes=num_nodes,
@@ -130,7 +157,7 @@ def main():
             device=device,
         )
         m.load_checkpoint()
-    elif args.model == "graphmixer":
+    elif args.model == "graphmixer" or args.model.startswith("graphmixer_time_"):
         m = GraphMixerModel(
             checkpoint_path=checkpoint,
             num_nodes=num_nodes,

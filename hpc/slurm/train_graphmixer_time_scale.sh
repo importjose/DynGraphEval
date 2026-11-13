@@ -19,7 +19,7 @@
 #   sbatch hpc/slurm/train_graphmixer_time_scale.sh
 #   DATA_DIR=/work/$USER/dge DATASET=tgbl-wiki SEED=1 sbatch hpc/slurm/train_graphmixer_time_scale.sh
 set -euo pipefail
-REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+REPO_DIR="$(cd "$SLURM_SUBMIT_DIR" && pwd)"
 source "$REPO_DIR/hpc/slurm/_common.sh"
 
 GRANULARITIES=("hour" "day" "week" "month")

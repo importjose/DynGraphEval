@@ -3,6 +3,8 @@
 import ast
 import importlib.util
 import json
+import math
+import textwrap
 import os
 import sys
 import tempfile
@@ -29,12 +31,76 @@ class TimeScaleIsolationTest(unittest.TestCase):
             }
             exec(compile(ast.Module(body=[function], type_ignores=[]), "resume", "exec"), namespace)
             model = types.SimpleNamespace(load_state_dict=lambda _: self.fail("Loaded wrong weights"))
-            env = {"TIME_ENCODER_VARIANT": f"{name}_time_day", "TIME_ENCODER_RUN_ID": "new_job",
-                   "TIME_SCALE": "1.1574074074074073e-05"}
+            env = {"TIME_ENCODER_VARIANT": f"{name}_bin_day", "TIME_ENCODER_RUN_ID": "new_job",
+                   "TIME_SCALE": "1.1574074074074073e-05", "TIME_BIN_WIDTH": "86400.0",
+                   "TIME_ENCODING_MODE": "binned"}
             with patch.dict(os.environ, env):
                 with self.assertRaisesRegex(ValueError, "experiment mismatch"):
                     namespace["_load_resume_checkpoint"]("old.pkl", model, None, None,
                                                          name.upper(), "cpu")
+
+    def test_binning_differs_from_continuous_scaling(self):
+        for width in (3600, 86400, 604800, 2592000):
+            self.assertEqual(math.floor(0 / width), 0)
+            self.assertEqual(math.floor((width - 1) / width), 0)
+            self.assertEqual(math.floor(width / width), 1)
+            self.assertEqual(math.floor((width + 1) / width), 1)
+            self.assertNotEqual((width + 1) / width, 1)
+        # The training patch must apply before model construction, for all architectures.
+        root = Path(__file__).resolve().parents[1]
+        for model in ("tgn", "tgat", "graphmixer"):
+            source = (root / "models" / f"{model}_time_scale" / "patches" /
+                      "train_link_prediction.py").read_text()
+            self.assertLess(source.index("[time-bin] Applying floor(age"),
+                            source.index("if args.model_name == 'TGAT':"))
+            self.assertIn("torch.floor(ages / _width)", source)
+
+    def test_training_patch_buckets_ages_in_all_three_models(self):
+        root = Path(__file__).resolve().parents[1]
+        for model in ("tgn", "tgat", "graphmixer"):
+            source = (root / "models" / f"{model}_time_scale" / "patches" /
+                      "train_link_prediction.py").read_text()
+            start = source.index("        # Patch the shared encoder before constructing ANY backbone.")
+            end = source.index("        # ── Build model", start)
+            snippet = textwrap.dedent(source[start:end]).replace(
+                "from models.modules import TimeEncoder", "# supplied by test")
+            class TimeEncoder:
+                def forward(self, timestamps):
+                    return timestamps
+            env = {"TIME_ENCODING_MODE": "binned", "TIME_BIN_WIDTH": "3600",
+                   "TIME_SCALE": str(1 / 3600)}
+            namespace = {"os": os, "torch": types.SimpleNamespace(floor=math.floor),
+                         "np": types.SimpleNamespace(isfinite=math.isfinite),
+                         "TimeEncoder": TimeEncoder}
+            with patch.dict(os.environ, env):
+                exec(snippet, namespace)
+            encoder = TimeEncoder()
+            self.assertEqual([encoder.forward(age) for age in (0, 3599, 3600, 3601, 7200)],
+                             [0, 0, 1, 1, 2])
+
+    def test_evaluation_uses_same_bins_as_training(self):
+        root = Path(__file__).resolve().parents[1]
+        source = (root / "hpc" / "eval.py").read_text()
+        for name in ("tgat_bin_hour", "tgat_bin_month"):
+            self.assertIn(f'"{name}"', source)
+        start = source.index("    _TIME_GRAN_WIDTHS =")
+        end = source.index("    # ── Load dataset", start)
+        snippet = textwrap.dedent(source[start:end])
+        for model in ("tgn_bin_hour", "tgat_bin_hour", "tgat_bin_day",
+                      "tgat_bin_week", "tgat_bin_month", "graphmixer_bin_week"):
+            class TimeEncoder:
+                def forward(self, timestamps):
+                    return timestamps
+            modules = {key: types.ModuleType(key) for key in
+                       ("models", "models.tgn", "models.tgn.tpnet_components")}
+            modules["models.tgn.tpnet_components"].TimeEncoder = TimeEncoder
+            namespace = {"torch": types.SimpleNamespace(floor=math.floor),
+                         "args": types.SimpleNamespace(model=model), "_log": lambda _: None}
+            with patch.dict(sys.modules, modules):
+                exec(snippet, namespace)
+            width = namespace["_TIME_GRAN_WIDTHS"][model.rsplit("_", 1)[-1]]
+            self.assertEqual([TimeEncoder().forward(age) for age in (0, width-1, width, width+1)],
+                             [0, 0, 1, 1])
 
     def test_variants_and_jobs_do_not_share_models_or_outputs(self):
         root = Path(__file__).resolve().parents[1]
@@ -43,7 +109,9 @@ class TimeScaleIsolationTest(unittest.TestCase):
         variants = [
             ("tgn_time_scale", "hour", "TGN"),
             ("tgn_time_scale", "day", "TGN"),
+            ("tgat_time_scale", "hour", "TGAT"),
             ("tgat_time_scale", "day", "TGAT"),
+            ("tgat_time_scale", "month", "TGAT"),
             ("graphmixer_time_scale", "hour", "GraphMixer"),
         ]
         seen_directories = set()
@@ -59,14 +127,15 @@ class TimeScaleIsolationTest(unittest.TestCase):
                     # Slurm reuses one temporary repo for multiple granularities.
                     repo = Path(tmp) / f"repo_{script}_{job}"
                     repo.mkdir(exist_ok=True)
-                    variant_name = f"{script.removesuffix('_scale')}_{granularity}"
+                    variant_name = f"{script.removesuffix('_time_scale')}_bin_{granularity}"
                     output = (Path(tmp) / "storage" / "runs" / "tgbl-wiki" /
                               variant_name / "seed0" / job)
 
                     def pretend_train(command, extra_env):
                         self.assertEqual(extra_env["TIME_ENCODER_VARIANT"], variant_name)
                         self.assertEqual(extra_env["TIME_ENCODER_RUN_ID"], job)
-                        self.assertIn("TIME_SCALE", extra_env)
+                        self.assertEqual(extra_env["TIME_ENCODING_MODE"], "binned")
+                        self.assertIn("TIME_BIN_WIDTH", extra_env)
                         isolated = (repo / "saved_models").resolve()
                         self.assertNotIn(isolated, seen_directories)
                         seen_directories.add(isolated)
@@ -85,6 +154,7 @@ class TimeScaleIsolationTest(unittest.TestCase):
                     manifest = json.loads((output / "manifest.json").read_text())
                     self.assertEqual(manifest["variant"], variant_name)
                     self.assertEqual(manifest["run_id"], job)
+                    self.assertEqual(manifest["encoding_mode"], "binned")
             self.assertEqual(len(seen_directories), len(variants) * 2)
 
 

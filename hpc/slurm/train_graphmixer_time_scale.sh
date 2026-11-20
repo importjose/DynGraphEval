@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#SBATCH --job-name=dge-gm-ts
+#SBATCH --job-name=dge-gm-bin
 #SBATCH --partition=shortq7
 #SBATCH --gres=gpu:a100:1
 #SBATCH --cpus-per-task=4
@@ -9,7 +9,7 @@
 #SBATCH --error=outputs/%x_%j.out
 #SBATCH --export=ALL
 #
-# Runs ONE GraphMixer granularity per job to fit the 6-hour GPU partition limit.
+# Runs ONE elapsed-time bin width per job to fit the 6-hour GPU partition limit.
 # Submit with: sbatch --export=ALL,GRANULARITY=hour hpc/slurm/train_graphmixer_time_scale.sh
 #
 # Submit:
@@ -28,7 +28,7 @@ GRANULARITIES=("$GRANULARITY")
 _setup_job_repo
 
 for GRAN in "${GRANULARITIES[@]}"; do
-    MODEL_NAME="graphmixer_time_${GRAN}"
+    MODEL_NAME="graphmixer_bin_${GRAN}"
     RUN_DIR="$DATA_DIR/runs/$DATASET/$MODEL_NAME/seed${SEED}/${JOB_ID}"
     mkdir -p "$RUN_DIR"
     LOG_FILE="$RUN_DIR/run.log"
@@ -40,6 +40,7 @@ for GRAN in "${GRANULARITIES[@]}"; do
 
     "$PYTHON" "$REPO_DIR/models/graphmixer_time_scale/train.py" \
         --granularity     "$GRAN" \
+        --encoding_mode   binned \
         --run_id          "$JOB_ID" \
         --dataset         "$DATASET" \
         --seed            "$SEED" \

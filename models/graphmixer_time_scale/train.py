@@ -1,17 +1,11 @@
 """
-Temporal granularity ablation for GraphMixer: scale TimeEncoder input timestamps.
+GraphMixer elapsed-time encoder ablation.
 
-This variant trains GraphMixer (TPNet implementation) with timestamps pre-scaled
-by a fixed factor before they enter the TimeEncoder's cosine encoding.  Scaling
-controls the temporal resolution the model's learned frequencies operate at:
-
-  - hour  (1/3600):   encoder unit ≈ 1 hour
-  - day   (1/86400):  encoder unit ≈ 1 day
-  - week  (1/604800): encoder unit ≈ 1 week
-  - month (1/2592000):encoder unit ≈ 1 month
-
-The underlying model weights and architecture are identical to plain GraphMixer;
-only the granularity of the temporal signal fed to the TimeEncoder changes.
+Default mode bins relative ages: floor(age / bin_width) before cosine.
+Widths 3600/86400/604800/2592000 are in original timestamp units and map
+to hour/day/week/month only when timestamps are seconds. Event ordering and
+neighbor sampling are unchanged. --encoding_mode scaled preserves older
+continuous input scaling under distinct *_time_* names.
 
 Usage:
     python models/graphmixer_time_scale/train.py --granularity day --dataset tgbl-wiki
@@ -19,7 +13,7 @@ Usage:
 
 Artifacts saved to:
     run_dir/{checkpoint.pkl, trainer/} where run_dir defaults to
-    data/runs/{dataset}/graphmixer_time_{granularity}/seed{seed}/{run_id}/
+    data/runs/{dataset}/graphmixer_bin_{granularity}/seed{seed}/{run_id}/ (default)
 
 Run from the DynGraphEval root directory.
 """
@@ -57,8 +51,10 @@ def run(cmd: str, extra_env: dict = None) -> None:
 
 def parse_args():
     p = argparse.ArgumentParser()
+    p.add_argument("--encoding_mode", choices=["binned", "scaled"], default="binned",
+                   help="Binned: floor(age / bin_width); scaled: age / bin_width (legacy control)")
     p.add_argument("--granularity",    choices=["hour", "day", "week", "month"], required=True,
-                   help="Temporal granularity: scale factor applied to timestamps before TimeEncoder")
+                   help="Elapsed-time bin width (in timestamp units, named assuming seconds)")
     p.add_argument("--run_id",         default=None,
                    help="Unique job identifier; defaults to SLURM_JOB_ID or a random ID")
     p.add_argument("--dataset",        default="tgbl-wiki")
@@ -101,8 +97,9 @@ def _apply_patches(repo_dir: str) -> None:
 def main():
     args = parse_args()
 
-    model_name = f"graphmixer_time_{args.granularity}"
+    model_name = f"graphmixer_{'bin' if args.encoding_mode == 'binned' else 'time'}_{args.granularity}"
     scale      = SCALE_MAP[args.granularity]
+    bin_width  = 1.0 / scale  # Width in the original timestamp units (seconds if timestamps are seconds).
     run_id = args.run_id or os.environ.get("SLURM_JOB_ID") or uuid.uuid4().hex[:12]
     if not re.fullmatch(r"[A-Za-z0-9_-]+", run_id):
         raise ValueError("run_id may contain only letters, digits, underscores, and hyphens")
@@ -124,7 +121,8 @@ def main():
     os.makedirs(run_dir, exist_ok=True)
     _log(f"Run directory: {run_dir}")
     manifest = {"dataset": args.dataset, "variant": model_name, "seed": args.seed,
-                "run_id": run_id, "time_scale": scale, "training_args": vars(args)}
+                "run_id": run_id, "encoding_mode": args.encoding_mode,
+                "bin_width": bin_width, "training_args": vars(args)}
     with open(os.path.join(run_dir, "manifest.json"), "w") as f:
         json.dump(manifest, f, indent=2)
 
@@ -164,7 +162,7 @@ def main():
     # ── Run training ──────────────────────────────────────────────────────────
     prefix = f"run{args.seed}"
     _log(f"Starting training: {model_name} on {args.dataset} | "
-         f"scale={scale:.2e} ({args.granularity}) | "
+         f"mode={args.encoding_mode} width={bin_width:g} ({args.granularity}) | "
          f"epochs={args.epochs} patience={args.patience} batch={args.batch_size}")
 
     train_cmd = (
@@ -187,8 +185,10 @@ def main():
         f"  --gpu {args.gpu} "
         f"  --prefix {prefix}"
     )
-    # TIME_SCALE signals the patch to scale TimeEncoder input timestamps
+    # The vendored trainer logs the active transform before building the backbone.
     run(train_cmd, extra_env={"TIME_SCALE": str(scale),
+                              "TIME_BIN_WIDTH": str(bin_width),
+                              "TIME_ENCODING_MODE": args.encoding_mode,
                               "TIME_ENCODER_VARIANT": model_name,
                               "TIME_ENCODER_RUN_ID": run_id})
     _log("Training complete.")

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#SBATCH --job-name=dge-tgat-ts
+#SBATCH --job-name=dge-tgat-bin
 #SBATCH --partition=shortq7
 #SBATCH --gres=gpu:a100:1
 #SBATCH --cpus-per-task=4
@@ -9,27 +9,25 @@
 #SBATCH --error=outputs/%x_%j.out
 #SBATCH --export=ALL
 #
-# Runs ONE TGAT granularity per job on the 6-hour GPU partition.
-# Only day and week are implemented for TGAT.
+# Runs ONE elapsed-time bin width per job on the 6-hour GPU partition.
+# TGAT now supports the same hour/day/week/month widths as TGN and GraphMixer.
 # Submit with: sbatch --export=ALL,GRANULARITY=day hpc/slurm/train_tgat_time_scale.sh
 #
-# Submit:
-#   sbatch hpc/slurm/train_tgat_time_scale.sh
-#   DATA_DIR=/work/$USER/dge DATASET=tgbl-wiki SEED=1 sbatch hpc/slurm/train_tgat_time_scale.sh
+# Alternate settings: DATASET=tgbl-wiki SEED=1 sbatch --export=ALL,GRANULARITY=week hpc/slurm/train_tgat_time_scale.sh
 set -euo pipefail
 REPO_DIR="$(cd "$SLURM_SUBMIT_DIR" && pwd)"
 source "$REPO_DIR/hpc/slurm/_common.sh"
 
 case "${GRANULARITY:-}" in
-    day|week) ;;
-    *) echo "Set GRANULARITY=day|week at submission" >&2; exit 2 ;;
+    hour|day|week|month) ;;
+    *) echo "Set GRANULARITY=hour|day|week|month at submission" >&2; exit 2 ;;
 esac
 GRANULARITIES=("$GRANULARITY")
 
 _setup_job_repo
 
 for GRAN in "${GRANULARITIES[@]}"; do
-    MODEL_NAME="tgat_time_${GRAN}"
+    MODEL_NAME="tgat_bin_${GRAN}"
     RUN_DIR="$DATA_DIR/runs/$DATASET/$MODEL_NAME/seed${SEED}/${JOB_ID}"
     mkdir -p "$RUN_DIR"
     LOG_FILE="$RUN_DIR/run.log"
@@ -41,6 +39,7 @@ for GRAN in "${GRANULARITIES[@]}"; do
 
     "$PYTHON" "$REPO_DIR/models/tgat_time_scale/train.py" \
         --granularity     "$GRAN" \
+        --encoding_mode   binned \
         --run_id          "$JOB_ID" \
         --dataset         "$DATASET" \
         --seed            "$SEED" \
@@ -66,4 +65,4 @@ for GRAN in "${GRANULARITIES[@]}"; do
 done
 
 _cleanup_job_repo
-echo "[done] All TGAT time-scale variants complete."
+echo "[done] TGAT binning variant complete."

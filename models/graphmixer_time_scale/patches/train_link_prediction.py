@@ -9,8 +9,9 @@
 #     only (console handler is WARNING), so nothing was visible during training.
 #   - torch.cuda.empty_cache() after training epoch and after each val pass.
 #   - GPU memory usage printed after each epoch (not just at run end).
-#   - TIME_SCALE env var: monkey-patches TimeEncoder.forward to scale input
-#     timestamps, controlling the temporal resolution of the encoding.
+#   - TIME_ENCODING_MODE=binned applies floor(relative_age / TIME_BIN_WIDTH)
+#     before the cosine encoder; scaled mode retains continuous legacy scaling.
+#     The patch is installed for every supported backbone before model construction.
 
 import logging
 import time
@@ -84,6 +85,8 @@ def _save_resume_checkpoint(saved_models_dir, prefix, epoch, model, optimizer,
             'variant': os.environ['TIME_ENCODER_VARIANT'],
             'run_id': os.environ['TIME_ENCODER_RUN_ID'],
             'time_scale': os.environ['TIME_SCALE'],
+            'encoding_mode': os.environ['TIME_ENCODING_MODE'],
+            'bin_width': os.environ['TIME_BIN_WIDTH'],
             'model_name': model_name,
         },
         'model':           model.state_dict(),
@@ -123,6 +126,8 @@ def _load_resume_checkpoint(path, model, optimizer, early_stopping, model_name, 
         'variant': os.environ['TIME_ENCODER_VARIANT'],
         'run_id': os.environ['TIME_ENCODER_RUN_ID'],
         'time_scale': os.environ['TIME_SCALE'],
+        'encoding_mode': os.environ['TIME_ENCODING_MODE'],
+        'bin_width': os.environ['TIME_BIN_WIDTH'],
         'model_name': model_name,
     }
     if payload.get('experiment') != expected:
@@ -266,6 +271,26 @@ if __name__ == "__main__":
         logger.info(f"********** Run {run + 1} starts. **********")
         logger.info(f'configuration is {args}')
 
+        # Patch the shared encoder before constructing ANY backbone.
+        from models.modules import TimeEncoder
+        _mode = os.environ['TIME_ENCODING_MODE']
+        _width = float(os.environ['TIME_BIN_WIDTH'])
+        _scale = float(os.environ['TIME_SCALE'])
+        if _mode == 'binned':
+            if not np.isfinite(_width) or _width <= 0:
+                raise ValueError(f'Invalid time bin width: {_width}')
+            _transform = lambda ages: torch.floor(ages / _width)
+            print(f'  [time-bin] Applying floor(age / {_width:g}) to TimeEncoder input', flush=True)
+        elif _mode == 'scaled':
+            _transform = lambda ages: ages * _scale
+            print(f'  [time-scale] Applying age * {_scale:g} to TimeEncoder input', flush=True)
+        else:
+            raise ValueError(f'Unknown time encoding mode: {_mode}')
+        _original_forward = TimeEncoder.forward
+        def _encoded_forward(self, timestamps, _orig=_original_forward, _fn=_transform):
+            return _orig(self, _fn(timestamps))
+        TimeEncoder.forward = _encoded_forward
+
         # ── Build model ───────────────────────────────────────────────────────
         random_projections = None
         if args.use_random_projection:
@@ -298,16 +323,6 @@ if __name__ == "__main__":
                 dst_node_mean_time_shift_dst=dst_node_mean_time_shift_dst,
                 dst_node_std_time_shift=dst_node_std_time_shift, device=args.device,
                 beta=args.pint_beta, num_hop=args.pint_hop)
-            # ── Ablation: scale TimeEncoder input to control temporal granularity ─────
-            _TIME_SCALE = float(os.environ.get("TIME_SCALE", "1.0"))
-            if _TIME_SCALE != 1.0:
-                from models.modules import TimeEncoder
-                _orig_time_forward = TimeEncoder.forward
-                def _scaled_forward(self, timestamps, _s=_TIME_SCALE, _orig=_orig_time_forward):
-                    return _orig(self, timestamps * _s)
-                TimeEncoder.forward = _scaled_forward
-                print(f"  [ablation] TimeEncoder input scaled by {_TIME_SCALE:.2e} — "
-                      f"effective resolution: {1.0/_TIME_SCALE:.0f}s per unit", flush=True)
         elif args.model_name == 'TPNet':
             dynamic_backbone = TPNet(
                 node_raw_features=node_raw_features, edge_raw_features=edge_raw_features,

@@ -34,11 +34,15 @@ def parse_args():
     p.add_argument("--model",          default="tgn",
                    choices=["tgn", "tgn_fixed_enc", "tgn_no_enc",
                             "tgn_time_hour", "tgn_time_day", "tgn_time_week", "tgn_time_month",
+                            "tgn_bin_hour", "tgn_bin_day", "tgn_bin_week", "tgn_bin_month",
                             "tgat", "tgat_fixed_enc", "tgat_no_enc",
-                            "tgat_time_day", "tgat_time_week",
+                            "tgat_time_hour", "tgat_time_day", "tgat_time_week", "tgat_time_month",
+                            "tgat_bin_hour", "tgat_bin_day", "tgat_bin_week", "tgat_bin_month",
                             "graphmixer", "graphmixer_multiscale",
                             "graphmixer_time_hour", "graphmixer_time_day",
                             "graphmixer_time_week", "graphmixer_time_month",
+                            "graphmixer_bin_hour", "graphmixer_bin_day",
+                            "graphmixer_bin_week", "graphmixer_bin_month",
                             "tpnet", "edgebank"],
                    help="Model to evaluate")
     p.add_argument("--checkpoint",     default=None,
@@ -96,27 +100,29 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     _log(f"Device: {device}")
 
-    # ── Time-scale patch for temporal granularity ablations ───────────────────────
-    _TIME_GRAN_SCALES = {
-        "hour":  1.0 / 3600,
-        "day":   1.0 / 86400,
-        "week":  1.0 / 604800,
-        "month": 1.0 / 2592000,
-    }
+    # Apply the same transformation during memory warmup and link scoring.
+    _TIME_GRAN_WIDTHS = {"hour": 3600, "day": 86400,
+                         "week": 604800, "month": 2592000}
 
-    def _apply_time_scale_patch(model_name: str) -> None:
-        """Monkey-patch TimeEncoder.forward to scale input timestamps if needed."""
-        for gran, scale in _TIME_GRAN_SCALES.items():
-            if model_name.endswith(f"_time_{gran}"):
-                from models.tgn.tpnet_components import TimeEncoder
-                _orig = TimeEncoder.forward
-                def _scaled(self, timestamps, _s=scale, _o=_orig):
-                    return _o(self, timestamps * _s)
-                TimeEncoder.forward = _scaled
-                _log(f"[time-scale] TimeEncoder input ×{scale:.2e} ({gran}-resolution)")
-                return
+    def _apply_time_encoding_patch(model_name: str) -> None:
+        for gran, width in _TIME_GRAN_WIDTHS.items():
+            mode = ("binned" if model_name.endswith(f"_bin_{gran}") else
+                    "scaled" if model_name.endswith(f"_time_{gran}") else None)
+            if mode is None:
+                continue
+            from models.tgn.tpnet_components import TimeEncoder
+            _orig = TimeEncoder.forward
+            def _forward(self, timestamps, _w=width, _mode=mode, _orig=_orig):
+                ages = (torch.floor(timestamps / _w) if _mode == "binned"
+                        else timestamps / _w)
+                return _orig(self, ages)
+            TimeEncoder.forward = _forward
+            _log(f"[time-{mode}] TimeEncoder input: "
+                 f"{'floor(age / width)' if mode == 'binned' else 'age / width'} "
+                 f"(width={width} input units)")
+            return
 
-    _apply_time_scale_patch(args.model)
+    _apply_time_encoding_patch(args.model)
 
     # ── Load dataset ───────────────────────────────────────────────────────────
     _log(f"Loading dataset {args.dataset}...")
@@ -139,7 +145,8 @@ def main():
     from models.edgebank.model                  import EdgeBankModel
 
     _log(f"Loading model {args.model}...")
-    if args.model in ("tgn", "tgn_fixed_enc", "tgn_no_enc") or args.model.startswith("tgn_time_"):
+    if (args.model in ("tgn", "tgn_fixed_enc", "tgn_no_enc") or
+            args.model.startswith(("tgn_time_", "tgn_bin_"))):
         m = TPNetTGN(
             checkpoint_path=checkpoint,
             num_nodes=num_nodes,
@@ -150,7 +157,8 @@ def main():
             device=device,
         )
         m.load_checkpoint()
-    elif args.model in ("tgat", "tgat_fixed_enc", "tgat_no_enc") or args.model.startswith("tgat_time_"):
+    elif (args.model in ("tgat", "tgat_fixed_enc", "tgat_no_enc") or
+            args.model.startswith(("tgat_time_", "tgat_bin_"))):
         m = TGATModel(
             checkpoint_path=checkpoint,
             num_nodes=num_nodes,
@@ -161,7 +169,7 @@ def main():
             device=device,
         )
         m.load_checkpoint()
-    elif args.model == "graphmixer" or args.model.startswith("graphmixer_time_"):
+    elif args.model == "graphmixer" or args.model.startswith(("graphmixer_time_", "graphmixer_bin_")):
         m = GraphMixerModel(
             checkpoint_path=checkpoint,
             num_nodes=num_nodes,
@@ -233,9 +241,13 @@ def main():
         results["checkpoint_sha256"] = digest.hexdigest()
     else:
         results["checkpoint_sha256"] = None
-    results["time_scale"] = next(
-        (scale for gran, scale in _TIME_GRAN_SCALES.items()
-         if args.model.endswith(f"_time_{gran}")), None)
+    results["encoding_mode"] = ("binned" if "_bin_" in args.model else
+                                "scaled" if "_time_" in args.model else None)
+    results["bin_width"] = next(
+        (width for gran, width in _TIME_GRAN_WIDTHS.items()
+         if args.model.endswith((f"_bin_{gran}", f"_time_{gran}"))), None)
+    results["time_scale"] = (1.0 / results["bin_width"]
+                             if results["encoding_mode"] == "scaled" else None)
 
     # ── Save results ───────────────────────────────────────────────────────────
     ts    = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")

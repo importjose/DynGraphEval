@@ -19,8 +19,9 @@ Usage:
     python models/tgn_time_scale/train.py --granularity day --dataset tgbl-wiki
     python models/tgn_time_scale/train.py --granularity week --dataset tgbl-wiki --epochs 50
 
-Checkpoint saved to:
-    checkpoints_dir/tgn_time_{granularity}/{dataset}/run{seed}.pkl
+Artifacts saved to:
+    run_dir/{checkpoint.pkl, trainer/} where run_dir defaults to
+    data/runs/{dataset}/tgn_time_{granularity}/seed{seed}/{run_id}/
 
 Run from the DynGraphEval root directory.
 """
@@ -31,6 +32,9 @@ import shutil
 import subprocess
 import sys
 import time
+import uuid
+import re
+import json
 
 
 SCALE_MAP = {
@@ -55,6 +59,8 @@ def run(cmd: str, extra_env: dict = None) -> None:
 
 def parse_args():
     p = argparse.ArgumentParser()
+    p.add_argument("--run_id",         default=None,
+                   help="Unique job identifier; defaults to SLURM_JOB_ID or a random ID")
     p.add_argument("--granularity",    choices=["hour", "day", "week", "month"], required=True,
                    help="Temporal granularity: scale factor applied to timestamps before TimeEncoder")
     p.add_argument("--dataset",        default="tgbl-wiki")
@@ -75,10 +81,9 @@ def parse_args():
                    help="Path to vendored TGB_TPNet repo (default: src/TGB_TPNet)")
     p.add_argument("--datasets_cache", default=None,
                    help="Persistent directory for TGB datasets (symlinked into repo).")
-    p.add_argument("--checkpoints_dir", default=None,
-                   help="Root directory for checkpoints. "
-                        "Checkpoint written to {checkpoints_dir}/{dataset}/run{seed}.pkl. "
-                        "Defaults to models/tgn_time_scale/checkpoints relative to repo root.")
+    p.add_argument("--run_dir", default=None,
+                   help="Directory for this run's checkpoint and trainer state. "
+                        "Defaults to <data_root>/runs/{dataset}/{variant}/seed{seed}/{run_id}.")
     return p.parse_args()
 
 
@@ -101,6 +106,9 @@ def main():
 
     model_name = f"tgn_time_{args.granularity}"
     scale      = SCALE_MAP[args.granularity]
+    run_id = args.run_id or os.environ.get("SLURM_JOB_ID") or uuid.uuid4().hex[:12]
+    if not re.fullmatch(r"[A-Za-z0-9_-]+", run_id):
+        raise ValueError("run_id may contain only letters, digits, underscores, and hyphens")
 
     # ── Auto-detect GPU ───────────────────────────────────────────────────────
     import torch
@@ -114,15 +122,18 @@ def main():
         )
     _log(f"GPU {args.gpu}: {torch.cuda.get_device_name(args.gpu)}")
 
-    # ── Checkpoint destination ────────────────────────────────────────────────
-    if args.checkpoints_dir:
-        ckpt_dir = os.path.join(args.checkpoints_dir, args.dataset)
-    else:
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        root_dir   = os.path.dirname(os.path.dirname(script_dir))
-        ckpt_dir   = os.path.join(root_dir, "models", model_name, "checkpoints", args.dataset)
-    os.makedirs(ckpt_dir, exist_ok=True)
-    _log(f"Checkpoint dir: {ckpt_dir}")
+    # All artifacts for one experiment live under one unambiguous run directory.
+    project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    data_root = (os.path.dirname(os.path.realpath(args.datasets_cache))
+                 if args.datasets_cache else os.path.join(project_root, "data"))
+    run_dir = os.path.abspath(args.run_dir or os.path.join(
+        data_root, "runs", args.dataset, model_name, f"seed{args.seed}", run_id))
+    os.makedirs(run_dir, exist_ok=True)
+    _log(f"Run directory: {run_dir}")
+    manifest = {"dataset": args.dataset, "variant": model_name, "seed": args.seed,
+                "run_id": run_id, "time_scale": scale, "training_args": vars(args)}
+    with open(os.path.join(run_dir, "manifest.json"), "w") as f:
+        json.dump(manifest, f, indent=2)
 
     if args.repo_dir is None:
         root_dir      = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -143,16 +154,18 @@ def main():
         else:
             _log(f"Dataset cache already in place: {repo_datasets}")
 
-        drive_root   = os.path.dirname(os.path.realpath(args.datasets_cache))
-        drive_models = os.path.join(drive_root, "tpnet_saved_models")
-        repo_models  = os.path.join(args.repo_dir, "saved_models")
-        if not os.path.islink(repo_models):
-            shutil.rmtree(repo_models, ignore_errors=True)
-            os.makedirs(drive_models, exist_ok=True)
-            os.symlink(drive_models, repo_models)
-            _log(f"saved_models symlinked: {repo_models} → {drive_models}")
-        else:
-            _log(f"saved_models already symlinked: {repo_models}")
+    # The vendored trainer needs ./saved_models; point it at this run only.
+    drive_models = os.path.join(run_dir, "trainer")
+    repo_models = os.path.join(args.repo_dir, "saved_models")
+    os.makedirs(drive_models, exist_ok=True)
+    if os.path.islink(repo_models):
+        os.unlink(repo_models)
+    elif os.path.isdir(repo_models):
+        if os.listdir(repo_models):
+            raise RuntimeError(f"Refusing to replace nonempty saved_models: {repo_models}")
+        os.rmdir(repo_models)
+    os.symlink(drive_models, repo_models)
+    _log(f"Isolated saved_models: {repo_models} → {drive_models}")
 
     # ── Apply our patches over the cloned repo ────────────────────────────────
     _log("Applying patches...")
@@ -187,7 +200,9 @@ def main():
         f"  --prefix {prefix}"
     )
     # TIME_SCALE signals the patch to scale TimeEncoder input timestamps
-    run(train_cmd, extra_env={"TIME_SCALE": str(scale)})
+    run(train_cmd, extra_env={"TIME_SCALE": str(scale),
+                              "TIME_ENCODER_VARIANT": model_name,
+                              "TIME_ENCODER_RUN_ID": run_id})
     _log("Training complete.")
 
     # ── Copy checkpoint to our models/ structure ──────────────────────────────
@@ -195,7 +210,7 @@ def main():
         args.repo_dir, "saved_models",
         f"{prefix}_link_{args.dataset}_TGN_seed{args.seed}.pkl"
     )
-    dst = os.path.join(ckpt_dir, f"run{args.seed}.pkl")
+    dst = os.path.join(run_dir, "checkpoint.pkl")
 
     if not os.path.exists(src):
         saved = os.listdir(os.path.join(args.repo_dir, "saved_models"))
@@ -208,7 +223,7 @@ def main():
     _log(f"Done. Checkpoint saved to: {dst}")
     print(f"\nTo evaluate:")
     print(f"  python hpc/eval.py --model {model_name} "
-          f"--dataset {args.dataset} --seed {args.seed}")
+          f"--dataset {args.dataset} --seed {args.seed} --checkpoint '{dst}'")
 
 
 if __name__ == "__main__":

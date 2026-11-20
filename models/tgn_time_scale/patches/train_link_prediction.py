@@ -80,6 +80,12 @@ def _save_resume_checkpoint(saved_models_dir, prefix, epoch, model, optimizer,
     path = _resume_ckpt_path(saved_models_dir, prefix, epoch)
     payload = {
         'epoch':           epoch,
+        'experiment': {
+            'variant': os.environ['TIME_ENCODER_VARIANT'],
+            'run_id': os.environ['TIME_ENCODER_RUN_ID'],
+            'time_scale': os.environ['TIME_SCALE'],
+            'model_name': model_name,
+        },
         'model':           model.state_dict(),
         'optimizer':       optimizer.state_dict(),
         'early_stopping':  {
@@ -113,6 +119,15 @@ def _find_latest_resume_checkpoint(saved_models_dir: str, prefix: str):
 def _load_resume_checkpoint(path, model, optimizer, early_stopping, model_name, device):
     """Load resume checkpoint and restore model/optimizer/memory/early-stopping state."""
     payload = torch.load(path, map_location=device, weights_only=False)
+    expected = {
+        'variant': os.environ['TIME_ENCODER_VARIANT'],
+        'run_id': os.environ['TIME_ENCODER_RUN_ID'],
+        'time_scale': os.environ['TIME_SCALE'],
+        'model_name': model_name,
+    }
+    if payload.get('experiment') != expected:
+        raise ValueError(f"Resume checkpoint experiment mismatch: {path}; "
+                         f"expected {expected}, found {payload.get('experiment')}")
     model.load_state_dict(payload['model'])
     optimizer.load_state_dict(payload['optimizer'])
     es = payload['early_stopping']

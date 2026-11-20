@@ -18,6 +18,7 @@ import os
 import sys
 import datetime
 import time
+import hashlib
 
 # Ensure repo root is on sys.path
 REPO_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -57,6 +58,9 @@ def parse_args():
                    help="Root checkpoints directory. Checkpoint resolved as "
                         "{checkpoints_dir}/{model}/{dataset}/run{seed}.pkl. "
                         "Default: data/checkpoints relative to repo root")
+    p.add_argument("--output",         default=None,
+                   help="Exact output JSON path (e.g. runs/<dataset>/<variant>/seed0/<run-id>/metrics.json). "
+                        "Overrides --results_dir; legacy flat-file output remains the default.")
     p.add_argument("--results_dir",    default=None,
                    help="Output directory for JSON results. Default: results/ in repo root")
     p.add_argument("--neg_cache_dir",  default=None,
@@ -219,11 +223,26 @@ def main():
     results["model"]   = args.model
     results["dataset"] = args.dataset
     results["seed"]    = args.seed
+    results["job_id"] = os.environ.get("SLURM_JOB_ID")
+    results["checkpoint_path"] = os.path.abspath(checkpoint) if checkpoint else None
+    if checkpoint:
+        digest = hashlib.sha256()
+        with open(checkpoint, "rb") as checkpoint_file:
+            for chunk in iter(lambda: checkpoint_file.read(1024 * 1024), b""):
+                digest.update(chunk)
+        results["checkpoint_sha256"] = digest.hexdigest()
+    else:
+        results["checkpoint_sha256"] = None
+    results["time_scale"] = next(
+        (scale for gran, scale in _TIME_GRAN_SCALES.items()
+         if args.model.endswith(f"_time_{gran}")), None)
 
     # ── Save results ───────────────────────────────────────────────────────────
     ts    = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     fname = f"{args.model}_{args.dataset}_{ts}.json"
-    out   = os.path.join(results_dir, fname)
+    out   = os.path.abspath(args.output or os.path.join(results_dir, fname))
+    os.makedirs(os.path.dirname(out), exist_ok=True)
+    results["run_id"] = os.path.basename(os.path.dirname(out)) if args.output else None
     with open(out, "w") as f:
         json.dump(results, f, indent=2)
 

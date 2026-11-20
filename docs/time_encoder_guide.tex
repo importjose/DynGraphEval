@@ -1,0 +1,234 @@
+% Standalone dissertation-oriented guide. Compile with pdflatex or latexmk -pdf.
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{amsmath,amssymb,booktabs,array}
+\usepackage{hyperref}
+\usepackage{listings}
+\usepackage{xcolor}
+\hypersetup{colorlinks=true,linkcolor=blue,urlcolor=blue}
+\lstset{basicstyle=\ttfamily\small,breaklines=true,frame=single,columns=fullflexible}
+\title{Time Encoding in DynGraphEval\\\large Mathematics, Intuition, Implementation, and Experimental Interpretation}
+\author{}
+\date{}
+\begin{document}
+\maketitle
+\tableofcontents
+
+\section{What is being encoded?}
+A temporal interaction is an event $(u,v,t,\mathbf{x})$, where $u$ and $v$ are nodes, $t$ is an event time, and $\mathbf{x}$ contains edge attributes. To predict a link at query time $t$, models inspect historical events $(u_i,v_i,t_i,\mathbf{x}_i)$ with $t_i<t$. The quantity passed into the main time encoder is usually an \emph{elapsed time}
+\begin{equation}\label{eq:age}
+\Delta_i=t-t_i\geq 0,
+\end{equation}
+not the absolute timestamp $t_i$. TGN also encodes time elapsed since a node's memory was last updated. These are distinct inputs to the same encoder.
+
+A scalar $\Delta_i$ could be given directly to a network. Encoding it into a multiscale vector gives a downstream layer access to several smooth functions of elapsed time. This is a \emph{feature representation}, not by itself a decay law, proof of temporal reasoning, or learned preference for recent events.
+
+\section{A small mathematical toolkit (start here)}
+You do not need advanced Fourier analysis to follow this guide. Here is the vocabulary:
+\begin{center}
+\begin{tabular}{>{$}l<{$}p{0.72\linewidth}}
+\toprule
+\text{Symbol} & Meaning \\
+\midrule
+t,t_i & Query time and an earlier event's time.\\
+\Delta=t-t_i & Elapsed time (age), in the same units as timestamps.\\
+d,j & Number of output features, and the index $j=0,\ldots,d-1$.\\
+\omega_j,b_j & Weight (frequency) and bias (phase) for feature $j$.\\
+\phi_j(\Delta) & Feature $j$ for age $\Delta$.\\
+\boldsymbol{\phi}(\Delta) & Vector (list) of all $d$ features.\\
+B,L & Batch size and number of time values per example.\\
+\Vert & Concatenation: placing vectors side by side.\\
+\bottomrule
+\end{tabular}
+\end{center}
+The letter $\omega$ is omega; $\phi$ is phi. A \emph{weight} is a number training can adjust; a \emph{fixed} weight cannot be adjusted. Cosine uses \emph{radians}: $\cos(0)=1$, $\cos(\pi)=-1$, $\cos(2\pi)=1$.
+
+\paragraph{One event before any neural-network math.}
+If an interaction happened at $t_i=12$ and we predict at $t=17$, its age is $\Delta=17-12=5$. Another event at $t_i=16$ has age $1$ and is more recent. If timestamps are seconds, these ages are seconds; if they are days, the ages are days. The encoder sees $5$ and $1$, \emph{not} $12$ and $16$.
+
+\section{The exact cosine encoder in this repository}
+The class \texttt{TimeEncoder} in \texttt{models/tgn/tpnet\_components.py} is shared by the evaluation wrappers for TGN, TGAT, and GraphMixer. The corresponding vendored training class is in \texttt{src/TGB\_TPNet/models/modules.py}. It applies a linear map from one scalar to $d$ channels, followed by cosine:
+\begin{equation}\label{eq:encoder}
+\boldsymbol{\phi}(\Delta)
+=\cos(\mathbf{w}\Delta+\mathbf{b})\in[-1,1]^d,
+\qquad
+\phi_j(\Delta)=\cos(\omega_j\Delta+b_j),\quad j=0,\ldots,d-1.
+\end{equation}
+\paragraph{Build the formula one operation at a time.}
+For a single age $\Delta$ and coordinate $j$:
+\begin{enumerate}
+\item Multiply age by its weight: $z_j=\omega_j\Delta$.
+\item Add the bias: $a_j=z_j+b_j$ (an angle in radians).
+\item Apply cosine: $\phi_j(\Delta)=\cos(a_j)$.
+\item Repeat for all $j=0,\ldots,d-1$; collect $\boldsymbol{\phi}(\Delta)=(\phi_0(\Delta),\ldots,\phi_{d-1}(\Delta))$.
+\end{enumerate}
+The same $\Delta$ enters every coordinate, each with its own weight and bias. The weight vector $\mathbf{w}$ is a $d\times1$ column. The linear operation makes $d$ angles and cosine acts \emph{on each angle separately}. For $B=2$ examples with $L=3$ ages each, the input shape is $(2,3)$: six scalars. With $d=100$, the output shape is $(2,3,100)$: every age has 100 features. The \texttt{unsqueeze(2)} introduces the extra tensor axis without changing age values. In the training scripts $d=100$ by default. Both $\mathbf{w}$ and $\mathbf{b}$ have $d$ entries, hence the encoder contains $2d$ scalar parameters. In code:
+\begin{lstlisting}[language=Python]
+self.w = nn.Linear(1, time_dim)
+self.w.weight = nn.Parameter(
+    torch.from_numpy(1 / 10 ** np.linspace(0, 9, time_dim,
+                                          dtype=np.float32)).reshape(time_dim, 1))
+self.w.bias = nn.Parameter(torch.zeros(time_dim))
+# forward(timestamps): torch.cos(self.w(timestamps.unsqueeze(2)))
+\end{lstlisting}
+For $d>1$, initialization is
+\begin{equation}\label{eq:init}
+\omega_j^{(0)}=10^{-\frac{9j}{d-1}},\qquad b_j^{(0)}=0.
+\end{equation}
+Thus initial angular frequencies run from $1$ to $10^{-9}$ radians per \emph{input unit}. The corresponding periods are $P_j=2\pi/|\omega_j|$ input units. A period is not $1/\omega_j$; also, an input unit is only a second if the dataset timestamps are measured in seconds. Adjacent initial frequencies for $d=100$ differ in magnitude by $10^{9/99}\approx1.233$. At zero elapsed time all initialized coordinates equal one: $\boldsymbol{\phi}(0)=\mathbf{1}$. The $d=1$ implementation initializes to frequency one rather than requiring the denominator in Equation~\eqref{eq:init}.
+
+\paragraph{Why are the initial frequencies spread out?}
+\texttt{linspace(0,9,d)} makes evenly spaced \emph{exponents}. Dividing 1 by $10$ raised to each exponent makes geometrically spaced weights. For a hand-computable illustration with $d=4$ (not the training default), the exponents are $(0,3,6,9)$ and the weights are $(1,10^{-3},10^{-6},10^{-9})$. With $d=100$ the steps are smaller, but the overall span is the same. At initialization all biases equal zero; for age zero every output is $\cos(0)=1$.
+
+\paragraph{A numerical example from input to output.}
+Imagine a two-feature encoder with \emph{illustrative} weights $\omega_0=1$, $\omega_1=0.1$ and biases $b_0=b_1=0$ (these are not the actual geometric initialization for $d=2$). If an event occurred at $t_i=12$ and the query is at $t=17$:
+\begin{align}
+\Delta&=17-12=5,\\
+\mathbf{w}\Delta+\mathbf{b}&=(1\cdot5+0,\;0.1\cdot5+0)=(5,0.5),\\
+\boldsymbol{\phi}(5)&=(\cos5,\cos0.5)\approx(0.284,0.878).
+\end{align}
+An event at $t_i=16$ is more recent: $\Delta=1$ and $\boldsymbol{\phi}(1)=(\cos1,\cos0.1)\approx(0.540,0.995)$. The more recent event happens to have larger values in both coordinates here, but that will \emph{not} always hold: at $\Delta=2\pi$ the first coordinate returns to one, exactly as at zero. The rapidly changing coordinate distinguishes nearby ages; the slow one spans a longer scale. Neither coordinate is intrinsically a ``recency score.'' In TGN and TGAT weights and biases are trainable. In GraphMixer the initialization is \emph{fixed}, although subsequent layers remain trainable.
+
+\section{Why a multiscale cosine basis?}
+\subsection{Useful intuition}
+Think of the vector as a bank of clock hands. Fast hands change substantially over short intervals; slow hands move over long intervals. Geometric spacing covers many orders of magnitude without requiring an enormous number of features. Learned transformations combine the clock readings with node and edge information. A nonlinear layer can then learn that certain intervals matter for a given prediction.
+
+\subsection{Smoothness and gradients}
+\paragraph{One derivative using the chain rule.}
+A derivative measures how output changes for a small change in input. Let $a_j=\omega_j\Delta+b_j$ and $\phi_j=\cos(a_j)$. The derivative of cosine is negative sine. The chain rule means ``differentiate the outside and multiply by the derivative of the inside'':
+\begin{equation}
+\frac{\partial\phi_j}{\partial\Delta}
+=\underbrace{-\sin(a_j)}_{\text{outside}}
+\underbrace{\frac{\partial a_j}{\partial\Delta}}_{\omega_j}
+=-\omega_j\sin(\omega_j\Delta+b_j).
+\end{equation}
+Holding $\Delta$ fixed, $\partial a_j/\partial\omega_j=\Delta$ and $\partial a_j/\partial b_j=1$. Thus the three derivatives are
+\begin{align}
+\frac{\partial\phi_j}{\partial\Delta}
+  &=-\omega_j\sin(\omega_j\Delta+b_j),\\
+\frac{\partial\phi_j}{\partial\omega_j}
+  &=-\Delta\sin(\omega_j\Delta+b_j),\\
+\frac{\partial\phi_j}{\partial b_j}
+  &=-\sin(\omega_j\Delta+b_j).
+\end{align}
+With zero initial phase, the derivative with respect to age vanishes at $\Delta=0$; for small $|\omega_j\Delta|$,
+\begin{equation}
+\phi_j(\Delta)\simeq1-\tfrac12(\omega_j\Delta)^2.
+\end{equation}
+The approximation substitutes $x=\omega_j\Delta$ into $\cos x\approx1-x^2/2$ near zero. If $x=0.01$, the output is about $0.99995$: nearby ages barely change this feature. This is a property of a coordinate at initialization, \emph{not} proof that the full model ignores short gaps. Features are bounded, but parameter gradients can depend on large $\Delta$, and extreme phases may cause numerical precision problems. Inspect actual gap distributions.
+
+\paragraph{How a frequency learns.}
+Let $\mathcal L$ be the loss, a number training tries to reduce. Backpropagation applies the same chain rule through the downstream network:
+\begin{equation}
+\frac{\partial\mathcal L}{\partial\omega_j}
+=\frac{\partial\mathcal L}{\partial\phi_j}
+\frac{\partial\phi_j}{\partial\omega_j}
+=\frac{\partial\mathcal L}{\partial\phi_j}
+[-\Delta\sin(\omega_j\Delta+b_j)].
+\end{equation}
+The first factor is determined by the downstream model and task, not by the encoder. The optimizer combines contributions over training examples and adjusts $\omega_j$. \emph{Freezing} stops the adjustment, but the feature $\phi_j(\Delta)$ is still computed and used.
+
+\subsection{Periodicity, aliasing, and what the representation does not guarantee}
+Cosine is not monotone: its output oscillates as age increases. A single coordinate repeats every $2\pi/|\omega_j|$. Combining multiple frequencies may distinguish ages over a relevant finite range, but there is no general guarantee of injectivity or monotone decay. If the scientific hypothesis is that predictive influence must decrease with age, a function such as $g(\Delta)=\exp(-\lambda\Delta)$ with $\lambda\geq0$ encodes that assumption more directly.
+
+\paragraph{Why do other papers pair sine with cosine?}
+A dot product multiplies matching entries and adds: $\boldsymbol{\phi}(\Delta)^{\mathsf T}\boldsymbol{\phi}(\Delta')=\sum_j\phi_j(\Delta)\phi_j(\Delta')$. At initial zero bias, substitute $\phi_j(\Delta)=\cos(\omega_j\Delta)$. Apply $\cos A\cos B=\tfrac12[\cos(A-B)+\cos(A+B)]$ with $A=\omega_j\Delta$ and $B=\omega_j\Delta'$. This produces
+\begin{align}
+\boldsymbol{\phi}(\Delta)^{\mathsf T}\boldsymbol{\phi}(\Delta')
+&=\sum_j\cos(\omega_j\Delta)\cos(\omega_j\Delta')\\
+&=\tfrac12\sum_j\left\{\cos\bigl(\omega_j(\Delta-\Delta')\bigr)
++\cos\bigl(\omega_j(\Delta+\Delta')\bigr)\right\}
+\label{eq:kernel}
+\end{align}
+at initialization. Because of the sum-of-ages term, this dot product is not strictly a translation-invariant kernel. Paired sine and cosine coordinates instead satisfy $\cos(\omega\Delta)\cos(\omega\Delta')+\sin(\omega\Delta)\sin(\omega\Delta')=\cos(\omega(\Delta-\Delta'))$. Here, however, these features are fed to learned layers rather than used solely as an explicit kernel.
+
+\subsection{Units and scaling}
+If an ablation multiplies encoder input by $s$, replace $\Delta$ with $s\Delta$ in Equation~\eqref{eq:encoder}. Since $\omega_j(s\Delta)=(s\omega_j)\Delta$, we get
+\begin{equation}\label{eq:scale}
+\phi_j(s\Delta)=\cos\bigl((s\omega_j)\Delta+b_j\bigr).
+\end{equation}
+For example, \emph{if timestamps are seconds}, with $\omega_j=1$ and $s=1/3600$, age $\Delta=3600$ enters cosine as $1$ radian instead of $3600$ radians. The initialized period in original seconds changes from $2\pi$ to $2\pi\cdot3600$. For a \emph{fixed} encoder scaling changes effective frequencies and periods. A \emph{newly trained} weight could in principle compensate: $\omega'_j=\omega_j/s$ in the scaled experiment gives $\omega'_j(s\Delta)=\omega_j\Delta$. This does not guarantee optimization finds such a weight. Initialization, gradients, and numerical precision also change. Scaling seconds by $1/86400$ does \emph{not} bin timestamps into days or discard sub-day variation. Check $|s\omega_j\Delta|$ over observed gaps.
+
+Encoding differences also has a symmetry: if every event and query time is shifted by $C$, $(t+C)-(t_i+C)=t-t_i$. Relative-time features cannot by themselves reveal hour of day or season. Explicit calendar features are necessary to model those patterns directly.
+
+\section{How each model consumes time features}
+\subsection{TGAT: time-conditioned neighborhood attention}
+The shared encoder is trainable in \texttt{models/tgat/tgat\_components.py}. At a query time $t$, the query receives $\boldsymbol{\phi}(0)$; a historical neighbor at $t_i$ receives $\boldsymbol{\phi}(t-t_i)$. Suppressing head indices, the attention layer in \texttt{models/tgn/tpnet\_components.py} computes approximately
+\begin{align}
+\mathbf{q}&=W_Q[\mathbf{h}_u\Vert\boldsymbol{\phi}(0)],\\
+\mathbf{k}_i&=W_K[\mathbf{h}_{v_i}\Vert\mathbf{x}_i\Vert\boldsymbol{\phi}(t-t_i)],\\
+\mathbf{v}_i&=W_V[\mathbf{h}_{v_i}\Vert\mathbf{x}_i\Vert\boldsymbol{\phi}(t-t_i)],\\
+a_i&=\frac{\exp(\mathbf{q}^{\mathsf T}\mathbf{k}_i/\sqrt{d_h})}
+{\sum_{r\in\mathcal N_u(t)}\exp(\mathbf{q}^{\mathsf T}\mathbf{k}_r/\sqrt{d_h})},
+\qquad \mathbf{h}'_u\sim\sum_{i\in\mathcal N_u(t)}a_i\mathbf{v}_i.
+\end{align}
+\paragraph{Read attention from left to right.}
+$[\cdot\Vert\cdot]$ stacks vectors; $W_Q,W_K,W_V$ are \emph{learned matrices}. The query $\mathbf q$ describes the node being predicted, at age zero. Each past neighbor has a key $\mathbf k_i$ to match against the query and a value $\mathbf v_i$ to contribute. The dot product $\mathbf q^{\mathsf T}\mathbf k_i$ is a learned match; division by $\sqrt{d_h}$ controls magnitude ($d_h$ is the per-head dimension). Exponentials and division by their sum make nonnegative attention weights $a_i$ that sum to one across valid neighbors. For two unnormalized match scores $0$ and $\ln 3$, the weights are $1/(1+3)=0.25$ and $3/(1+3)=0.75$. Nothing in Equation~\eqref{eq:encoder} forces the more recent neighbor to get $0.75$: learned projections decide how age matters. The actual module also uses multiple heads, masks, dropout, residuals, normalization, and merge layers. TGAT has no persistent memory bank, but historical-neighbor selection remains causal and recent-biased.
+
+\subsection{TGN: two distinct elapsed-time paths}
+TGN uses the \emph{same trainable encoder instance} in both attention and memory-message creation in \texttt{models/tgn/tpnet\_components.py}. First, its graph attention consumes neighbor ages $\Delta_i=t-t_i$ as above. Second, for a node $u$ whose memory was last updated at $\tau_u$, it creates a message containing
+\begin{equation}\label{eq:message}
+\mathbf{m}_{u\to v}(t)=
+[\mathbf{s}_u\Vert\mathbf{s}_v\Vert\boldsymbol{\phi}(t-\tau_u)\Vert\mathbf{x}_{uv}(t)].
+\end{equation}
+Here $\mathbf s_u$ and $\mathbf s_v$ are stored node memories, $\tau_u$ is $u$'s last recorded memory-update time, and $\mathbf x_{uv}$ is the current edge feature. The brackets \emph{concatenate}, not add. If $t=17$ and $\tau_u=9$, this message contains $\boldsymbol{\phi}(8)$, while a sampled historical neighbor at time $12$ contributes $\boldsymbol{\phi}(5)$ to attention. A selected stored message then enters a GRU memory updater; the reverse direction uses $v$'s own last-update time. The \emph{age of a sampled interaction} and the \emph{age of a node-memory state} answer different questions. Zeroing the shared encoder affects both; freezing preserves both. The memory bank and causal neighbor sampling can convey temporal information even if time features are removed. The current positive event is turned into a new message after the embeddings used for scoring are computed.
+
+\subsection{GraphMixer: fixed features, trainable mixer}
+\texttt{models/graphmixer/graphmixer\_components.py} fixes both encoder weights and biases. It concatenates $\boldsymbol{\phi}(t-t_i)$ with edge features, masks padded neighbors' time features to zero, then trains a projection and MLP-Mixer layers. A separate node-feature aggregation path does not consume these time features. ``Fixed time encoder'' therefore does not mean ``no time,'' nor does it freeze the prediction network.
+
+\subsection{Do not confuse distinct implementations}
+\texttt{models/tpnet/tpnet\_components.py} applies $\log(\Delta+1)$ \emph{before} a fixed cosine encoder: its input distribution is different from that of TGN/TGAT/GraphMixer. \texttt{models/components.py} contains another, PyG-style time encoder whose linear layer uses a different initialization; it is not the geometric-initialization class discussed above. Other vendored implementations, including NAT, should likewise be inspected separately.
+
+\section{Interpreting the repository's interventions}
+\begin{description}
+\item[FixedEnc.] The training patch in \texttt{models/tgn\_fixed\_enc/patches/} or \texttt{models/tgat\_fixed\_enc/patches/} sets encoder parameters' \texttt{requires\_grad=False}. The geometric cosine feature survives and downstream parameters still train. Compare with the corresponding baseline \emph{within} the same architecture.
+\item[NoEnc.] The training patches in \texttt{models/*\_no\_enc/patches/} replace the vendored encoder's forward output with zeros. Historical-neighbor selection and TGN memory are not removed. \textbf{Evaluation warning:} \texttt{hpc/eval.py} instantiates ordinary TGN/TGAT wrappers for the NoEnc checkpoints but does not apply an equivalent zero-forward patch. Their warmup and scoring consequently use the wrapper's normal cosine encoder after loading weights trained under zeros. The committed NoEnc result files must not be described as clean zero-encoder-at-test results without verifying the precise run. Correct this by ensuring the zero mode is active throughout warmup and scoring; TGN memory must be rebuilt under that same mode. The original \texttt{modal/eval.py} also does not dispatch these ablation model names.
+\item[Time-scale variants.] The training patches and \texttt{hpc/eval.py} multiply encoder inputs by $1/3600$, $1/86400$, $1/604800$, or $1/2592000$. This affects the encoder arguments, not the chronology of the graph. Equation~\eqref{eq:scale} explains why calling these settings ``hour/day/week/month resolution'' should not be mistaken for quantization.
+\item[Cross-model comparisons.] TGN versus TGAT versus GraphMixer also changes memory, aggregation, and other architecture. A cross-model score difference cannot isolate learned versus fixed time encoding.
+\end{description}
+
+\section{What the recorded results establish}
+The committed \texttt{results/*.json} for \texttt{tgbl-wiki} include the following approximate scores:
+\begin{center}
+\begin{tabular}{lrr}
+\toprule
+Model & Standard MRR & Recency MRR\\
+\midrule
+TGN & 0.6010 & 0.7892\\
+TGN+FixedEnc & 0.6922 & 0.8036\\
+TGAT & 0.5680 & 0.7729\\
+TGAT+FixedEnc & 0.5863 & 0.7744\\
+GraphMixer (fixed) & 0.5492 & 0.8208\\
+TGN+NoEnc (evaluation caveat) & 0.1856 & 0.6682\\
+TGAT+NoEnc (evaluation caveat) & 0.5601 & 0.7731\\
+\bottomrule
+\end{tabular}
+\end{center}
+Within TGN and TGAT, the recorded fixed-encoder scores are competitive with the trainable-encoder scores. This does \emph{not} show that all time representation is unnecessary, that the learned frequencies necessarily express recency, or that the TGN memory bank alone explains the difference. These results concern one dataset; some result files report a null seed and the NoEnc files report seed zero. Check matched checkpoints, negative samples, seeds, and training configurations before making causal claims.
+
+Standard MRR uses TGB evaluation negatives. Recency MRR instead ranks against a source's most recently visited distinct destinations before the positive event, excluding simultaneous positives (see \texttt{evaluate/negative\_sampler.py}); fewer than the nominal number of negatives may exist. A metric difference measures ranking under a candidate distribution, not the quality of a time representation in isolation.
+
+\section{How to become confident about the mechanism}
+\begin{enumerate}
+\item \textbf{Validate the pipeline.} Log the effective encoder mode, checkpoint hash, timestamp units, gap quantiles, and frequency ranges. Assert that zero-encoder tests produce zeros during \emph{both} TGN warmup and scoring.
+\item \textbf{Run matched, multi-seed interventions within each model.} Compare trained cosine, fixed cosine, trained-always-zero, scalar $\log(1+\Delta/c)$, and optionally sine/cosine pairs and monotone decays. Match feature dimensions and downstream parameter budgets when feasible, or disclose differences.
+\item \textbf{Separate temporal channels.} Compare recent with uniform historical-neighbor sampling while preserving $t_i<t$. For TGN, independently ablate time features in memory messages and in graph attention. This distinguishes encoded age from selection and stored state.
+\item \textbf{Measure actual time sensitivity.} Plot $\Delta$ distributions, initial and trained frequencies and periods, phase biases, gradient magnitudes, and feature variance over observed ages. Test score changes under carefully controlled modifications of historical ages; expect possible oscillations, not obligatory monotone decay.
+\item \textbf{Report appropriate uncertainty.} Use paired seeds, confidence intervals, matched negative sets, and Return/Explore and activity-stratified results. Inference-only zeroing is a distribution-shift stress test, not the same experiment as retraining without time features.
+\end{enumerate}
+
+\section{Questions that test understanding}
+\begin{enumerate}
+\item If all times shift by $C$, what happens to Equation~\eqref{eq:age}? Nothing, absent numerical or dataset-boundary changes.
+\item If $\Delta$ increases, must attention fall? No. Cosines oscillate and attention uses learned projections and contextual features.
+\item Does a fixed encoder remove time? No. It still supplies a nonconstant function of elapsed time.
+\item Does a zeroed TGN encoder remove all temporal information? No. Causal neighbor selection and the memory-update sequence remain.
+\item Would equal MRR for correctly zeroed TGAT imply that timestamps are universally irrelevant? No. It only addresses one configuration, task, dataset, and evaluation distribution.
+\end{enumerate}
+
+\section{Further reading}
+Xu et al., \emph{Inductive Representation Learning on Temporal Graphs} (TGAT, ICLR 2020); Rossi et al., \emph{Temporal Graph Networks for Deep Learning on Dynamic Graphs} (2020); Cong et al., \emph{Do We Really Need Complicated Model Architectures for Temporal Networks?} (GraphMixer, ICLR 2023). Compare the papers' definitions with the \emph{specific} implementation and checkpoint used here rather than assuming equivalence.
+
+\end{document}

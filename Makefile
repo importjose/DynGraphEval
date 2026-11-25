@@ -59,6 +59,10 @@ hpc-fetch:
 	    --include='manifest.json' --exclude='*' $(HPC_HOST):$(HPC_DATA_DIR)/runs/ runs/
 	rsync -avz $(HPC_HOST):$(HPC_DATA_DIR)/results/ results/
 
+hpc-fetch-bin-occupancy:
+	mkdir -p bin_occupancy
+	rsync -avz $(HPC_HOST):$(HPC_DATA_DIR)/bin_occupancy/ bin_occupancy/
+
 hpc-fetch-logs:
 	mkdir -p runs
 	rsync -avz --prune-empty-dirs --include='*/' --include='run.log' \

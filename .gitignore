@@ -223,6 +223,7 @@ datasets/
 neg_cache/
 results/
 runs/
+bin_occupancy/
 outputs/*.log
 outputs/*.out
 outputs/hpc-audit/

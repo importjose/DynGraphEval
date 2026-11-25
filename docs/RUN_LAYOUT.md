@@ -55,4 +55,10 @@ make hpc-fetch-checkpoint DATASET=tgbl-wiki MODEL=tgn_bin_day SEED=0 RUN_ID=4849
 
 Use `python hpc/eval.py --model tgn_bin_day --dataset tgbl-wiki --seed 0 --checkpoint /absolute/path/to/checkpoint.pkl --output /absolute/path/to/metrics.json` for manual evaluation of a new run. Do not omit `--checkpoint`: default resolution still targets the **legacy** `checkpoints/{model}/{dataset}/run{seed}.pkl`. Do not mix old flat results with clean runs for causal claims. The old files remain untouched; there is no automatic migration because some older experiments have ambiguous checkpoint provenance.
 
+## Bin-occupancy diagnostic
+
+The CPU-only `scripts/analyze_time_bins.py` inspects the TGB dataset without loading checkpoints. It groups same-timestamp events so histories include only interactions **strictly earlier** than each query, then records the valid first-hop ages for the last 20 historical neighbors of each positive edge's source and destination. Padding is excluded. It reports bin-0, bin-1, bins 2–9, and bins 10+ for each width, separately for train, validation, and test. The TGN message-age summary is explicitly a **proxy** based on the last endpoint interaction: real TGN memory updates use deferred messages and can have different last-update times. Recursive neighbor expansions and negative-candidate histories are not counted. The JSON marks the timestamp unit unverified.
+
+After deploying the script on Athene, use `sbatch hpc/slurm/analyze_time_bins.sh`, then `make hpc-fetch-bin-occupancy` locally to get `bin_occupancy/tgbl-wiki.json`. This job requests only CPUs (not an A100).
+
 For interrupted jobs, the Slurm job ID selects the directory. A fresh `sbatch` receives a new ID and starts an isolated run. Resuming the *same* directory intentionally requires passing its run ID and existing run directory, and the resume checkpoint's experiment identity (variant, model, run ID, and scale) must match. A fresh job never resumes a different job's trainer files.
